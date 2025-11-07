@@ -36,12 +36,12 @@ services:
     volumes:
       - ./storage:/app/storage  # Persistent browser contexts
       - /tmp:/tmp               # Screenshots and artifacts
-    env_file:
-      - .env
     environment:
       - NODE_ENV=test
       - DISPLAY=:99
       - NOVNC_URL=http://localhost:8080/vnc.html
+      - BASE_URL=https://example.com
+      - DEFAULT_LOGIN_URL=https://example.com/login
     depends_on:
       drupal-ui-automation:
         condition: service_healthy
