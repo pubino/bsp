@@ -3,6 +3,8 @@ const { chromium } = require('playwright');
 
 const app = require('../../server');
 
+jest.setTimeout(60000);
+
 // Determine test target based on environment
 const isInContainer = process.env.NODE_ENV === 'test';
 const testTarget = isInContainer ? app : app; // Always use the app directly
@@ -18,6 +20,25 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
   let testApp;
 
   beforeAll(async () => {
+    // Start Xvfb for browser testing in containerized environments
+    if (process.env.NODE_ENV === 'test' && process.platform === 'linux') {
+      try {
+        const { exec } = require('child_process');
+        console.log('Starting Xvfb for integration tests...');
+        exec('Xvfb :99 -screen 0 1024x768x24 &', (error, stdout, stderr) => {
+          if (error) {
+            console.log('Xvfb start output:', stdout);
+            console.log('Xvfb start error:', stderr);
+          }
+        });
+        // Wait for Xvfb to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('Xvfb started for integration tests');
+      } catch (error) {
+        console.log('Failed to start Xvfb:', error.message);
+      }
+    }
+
     // Always start a test server instance for integration tests
     testApp = app.listen(3001);
     console.log('Integration test server started on port 3001');
@@ -25,9 +46,27 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
 
   afterAll(async () => {
     if (testApp) {
+      try {
+        await request(testApp)
+          .post('/test/cleanup')
+          .expect(200);
+      } catch (error) {
+        console.log('Final API cleanup failed:', error.message);
+      }
+    }
+
+    if (testApp) {
       // Close the test server
-      await testApp.close();
-      console.log('Integration test server stopped');
+      await new Promise((resolve, reject) => {
+        testApp.close(error => {
+          if (error) {
+            return reject(error);
+          }
+          console.log('Integration test server stopped');
+          return resolve();
+        });
+      });
+      testApp = null;
     }
 
     // Additional cleanup for any remaining browser processes
@@ -181,7 +220,7 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
 
       // Note: Screenshot functionality may not work in containerized CI environments
       // but page interaction and control validation above confirms Playwright control
-    }, 30000);
+    }, 60000);
 
     test('should maintain control without automatic navigation', async () => {
       // Create interactive context

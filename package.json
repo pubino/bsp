@@ -12,7 +12,7 @@
     "test:unit:only": "NODE_ENV=test npx jest --testPathPattern=unit",
     "test:unit:host": "NODE_ENV=test npx jest --testPathPattern=unit",
     "test:integration": "node tests/run-integration-tests.js",
-    "test:integration:direct": "NODE_ENV=test npx jest --testPathPattern=integration",
+  "test:integration:direct": "NODE_ENV=test npx jest --testPathPattern=integration --runInBand --detectOpenHandles",
     "test:all": "NODE_ENV=test npx jest",
     "test:container": "docker-compose --profile test run --rm test",
     "test:integration:container": "docker-compose --profile test run --rm test npm run test:integration:direct",

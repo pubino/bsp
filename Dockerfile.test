@@ -89,5 +89,6 @@ ENV NODE_ENV=test
 ENV NOVNC_PORT=8080
 ENV VNC_PORT=5900
 
-# Use test startup script
-CMD ["./test-startup.sh"]
+# Ensure the startup script always wraps test commands
+ENTRYPOINT ["/app/test-startup.sh"]
+CMD ["npm", "run", "test:all"]
