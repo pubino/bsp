@@ -375,7 +375,16 @@ fi
 echo "Latest event node id: $LATEST_NODE_ID"
 
 # Fetch event details
-curl -s "http://localhost:3000/content/detail/$LATEST_NODE_ID" | jq
+curl -s "http://localhost:3000/content/detail/$LATEST_NODE_ID" \
+  | jq '{
+      title: (.content.data.title[0].value // .content.title[0].value // null),
+      subtitle: (.content.data.field_ps_events_subtitle[0].value // null),
+      body: (.content.data.field_ps_body[0].value // null),
+      start_date: (.content.data.field_ps_events_date[0].value.date // .content.data.field_ps_events_date[0].value[0].date // null),
+      start_time: (.content.data.field_ps_events_date[0].value.time // null),
+      end_time: (.content.data.field_ps_events_date[0].end_value.time // .content.data.field_ps_events_date[0].end_value[0].time // null),
+      location: (.content.data.field_ps_events_location_name[0].value // null)
+  }'
 ```
 
 2) Node.js (node-fetch)
@@ -426,19 +435,23 @@ async function getLatestEventDetails() {
   const content = detailJson.content || {};
   const data = content.data || {};
 
-  // Try common keys but fall back gracefully
-  const title = data.title || content.title || item.title || '(no title)';
-  const start = data.start || data.start_time || data.date || null;
-  const end = data.end || data.end_time || null;
-  const location = data.location || data.venue || null;
-  const category = data.category || data.type || content.contentType || item.type || null;
+  // Extract the requested fields (defensive optional chaining)
+  const title = data?.title?.[0]?.value ?? content?.title?.[0]?.value ?? item?.title ?? null;
+  const subtitle = data?.field_ps_events_subtitle?.[0]?.value ?? null;
+  const body = data?.field_ps_body?.[0]?.value ?? null;
+  const start_date = data?.field_ps_events_date?.[0]?.value?.date ?? null;
+  const start_time = data?.field_ps_events_date?.[0]?.value?.time ?? null;
+  const end_time = data?.field_ps_events_date?.[0]?.end_value?.time ?? null;
+  const location = data?.field_ps_events_location_name?.[0]?.value ?? null;
 
   console.log('Event details:');
   console.log('  title:', title);
-  console.log('  start:', start);
-  console.log('  end:  ', end);
+  console.log('  subtitle:', subtitle);
+  console.log('  body:', body ? (body.length > 200 ? body.slice(0, 200) + '...' : body) : null);
+  console.log('  start_date:', start_date);
+  console.log('  start_time:', start_time);
+  console.log('  end_time:', end_time);
   console.log('  location:', location);
-  console.log('  category:', category);
 }
 
 getLatestEventDetails().catch(err => console.error(err));
