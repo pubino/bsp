@@ -15,16 +15,16 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Build test container
-      run: docker-compose build test
+      run: docker compose build test
 
     - name: Run unit tests in container
       run: |
-        docker-compose --profile test run --rm test npm run test:unit:only
+        docker compose --profile test run --rm test npm run test:unit:only
 
     - name: Run integration tests in container
       run: |
-        docker-compose --profile test run --rm test npm run test:integration:direct
+        docker compose --profile test run --rm test npm run test:integration:direct
 
     - name: Run full test suite in container
       run: |
-        docker-compose --profile test run --rm test npm run test:all
+        docker compose --profile test run --rm test npm run test:all
