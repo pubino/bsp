@@ -27,6 +27,11 @@ class PlaywrightManager {
       return this.browser;
     }
 
+    // Prevent launching browser on host system - only allow in container with proper display
+    if (process.env.NODE_ENV !== 'test' && (!process.env.DISPLAY || process.env.DISPLAY !== ':99')) {
+      throw new Error('Browser launch only allowed in container environment with DISPLAY=:99');
+    }
+
     try {
       console.log('Launching browser with display:', this.display);
       console.log('DISPLAY environment variable:', process.env.DISPLAY);

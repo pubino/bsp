@@ -12,5 +12,6 @@ module.exports = {
   testTimeout: 30000, // 30 second timeout for integration tests
   verbose: true,
   forceExit: true, // Force exit to prevent hanging
-  detectOpenHandles: true // Detect open handles that prevent exit
+  detectOpenHandles: true, // Detect open handles that prevent exit
+  globalTeardown: '<rootDir>/tests/teardown.js' // Additional cleanup for Playwright processes
 };
