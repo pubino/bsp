@@ -1,9 +1,34 @@
 const PlaywrightManager = require('../../src/playwrightManager');
+const { chromium } = require('playwright');
+
+// Mock Playwright
+jest.mock('playwright', () => ({
+  chromium: {
+    launch: jest.fn().mockResolvedValue({
+      contexts: jest.fn().mockReturnValue([]),
+      newContext: jest.fn().mockResolvedValue({
+        newPage: jest.fn().mockResolvedValue({
+          url: jest.fn().mockReturnValue('about:blank'),
+          title: jest.fn().mockResolvedValue('Test Page'),
+          evaluate: jest.fn().mockResolvedValue('Test Title'),
+          screenshot: jest.fn().mockRejectedValue(new Error('Timeout')),
+          on: jest.fn().mockImplementation(() => {}),
+          close: jest.fn().mockResolvedValue(),
+        }),
+        close: jest.fn().mockResolvedValue(),
+      }),
+      close: jest.fn().mockResolvedValue(),
+    }),
+  },
+}));
 
 describe('PlaywrightManager Unit Tests', () => {
   let manager;
 
   beforeEach(() => {
+    // Clear all mocks
+    jest.clearAllMocks();
+
     // Create a new manager instance for each test
     manager = new PlaywrightManager();
   });
@@ -35,6 +60,7 @@ describe('PlaywrightManager Unit Tests', () => {
       // Now browser should exist
       expect(browser).toBeDefined();
       expect(manager.browser).toBe(browser);
+      expect(chromium.launch).toHaveBeenCalledTimes(1);
     });
   });
 
