@@ -348,6 +348,77 @@ for (let page = 1; page <= totalPages; page++) {
 console.log(`Successfully fetched ${allContent.length} total items`);
 ```
 
+### Example: Get latest Event then fetch its details
+
+Below are two small examples (curl and Node.js) showing how to fetch the most recent event from the `/content` endpoint and then use the discovered `nodeId` to request detailed fields from `/content/detail/:id` (title, start/end times, location, category).
+
+1) curl (shell)
+
+```bash
+# Fetch the latest event (limit=1, type=event) and extract node id
+LATEST_NODE_ID=$(curl -s "http://localhost:3000/content?limit=1&type=event" \
+  | jq -r '.content[0].nodeId')
+
+echo "Latest event node id: $LATEST_NODE_ID"
+
+# Fetch event details
+curl -s "http://localhost:3000/content/detail/$LATEST_NODE_ID" | jq
+```
+
+2) Node.js (node-fetch)
+
+Create a small script `examples/get-latest-event.js` (or run inline):
+
+```javascript
+import fetch from 'node-fetch';
+
+async function getLatestEventDetails() {
+  // 1) fetch latest event (type=event, limit=1)
+  const listRes = await fetch('http://localhost:3000/content?limit=1&type=event');
+  const listJson = await listRes.json();
+
+  if (!listJson || !listJson.content || listJson.content.length === 0) {
+    console.log('No events found');
+    return;
+  }
+
+  const nodeId = listJson.content[0].nodeId;
+  console.log('Found latest event nodeId=', nodeId);
+
+  // 2) fetch detail for that node id
+  const detailRes = await fetch(`http://localhost:3000/content/detail/${nodeId}`);
+  const detailJson = await detailRes.json();
+
+  if (!detailJson.success) {
+    console.error('Failed to fetch detail for node', nodeId, detailJson);
+    return;
+  }
+
+  // Extract common event fields (schema-dependent)
+  const content = detailJson.content || {};
+  const data = content.data || {};
+
+  const title = data.title || content.title || '(no title)';
+  const start = data.start || data.start_time || data.date || null;
+  const end = data.end || data.end_time || null;
+  const location = data.location || data.venue || null;
+  const category = data.category || data.type || content.contentType || null;
+
+  console.log('Event details:');
+  console.log('  title:', title);
+  console.log('  start:', start);
+  console.log('  end:  ', end);
+  console.log('  location:', location);
+  console.log('  category:', category);
+}
+
+getLatestEventDetails().catch(err => console.error(err));
+```
+
+Notes:
+- Field names for event start/end and location may vary by site schema. The example above attempts several common keys (`start`, `start_time`, `date`, `location`, `venue`, etc.) to be forgiving across sites.
+- The Node example uses ESM `import`; run with `node --experimental-modules examples/get-latest-event.js` or adapt to `require('node-fetch')` if using CommonJS.
+
 **Real Example Output:**
 ```bash
 === Example: Fetch 75 Most Recent Items (Demonstration) ===
