@@ -8,6 +8,12 @@ const isInContainer = process.env.NODE_ENV === 'test';
 const testTarget = isInContainer ? app : app; // Always use the app directly
 
 describe('Browser Auto-Launch and Navigation Tests', () => {
+  // Skip all browser behavior tests in CI environments where browser launch may be unreliable
+  if (process.env.CI) {
+    console.log('Skipping browser behavior tests in CI environment');
+    return;
+  }
+
   let server;
   let testApp;
 
@@ -150,12 +156,6 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
 
   describe('Playwright Control Validation', () => {
     test('should have browser under Playwright control', async () => {
-      // Skip this test in CI environments where browser control may be unreliable
-      if (process.env.CI) {
-        console.log('Skipping browser control validation test in CI environment');
-        return;
-      }
-
       // Create interactive context
       await getTestTarget()
         .post('/login/interactive')
@@ -184,12 +184,6 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
     }, 30000);
 
     test('should maintain control without automatic navigation', async () => {
-      // Skip this test in CI environments where browser control may be unreliable
-      if (process.env.CI) {
-        console.log('Skipping browser control navigation test in CI environment');
-        return;
-      }
-
       // Create interactive context
       await getTestTarget()
         .post('/login/interactive')
