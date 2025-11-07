@@ -85,5 +85,5 @@ ENV NODE_ENV=test
 ENV NOVNC_PORT=8080
 ENV VNC_PORT=5900
 
-# Default entrypoint (can be overridden)
-CMD ["npm", "run", "test:all"]
+# Start Xvfb in background and run tests
+CMD Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset & sleep 2 && npm run test:all

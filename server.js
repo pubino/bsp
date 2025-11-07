@@ -64,20 +64,24 @@ app.get('/playwright/ready', async (req, res) => {
 // Interactive login - creates fresh browser context for VNC access
 app.post('/login/interactive', async (req, res) => {
   try {
+    console.log('Starting interactive login process...');
+    
     // Close any existing context to start fresh
+    console.log('Closing existing browser context...');
     await playwrightManager.close();
 
     // Small delay to ensure cleanup is complete
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // Create new interactive context
+    console.log('Creating interactive context...');
     const { context, page } = await playwrightManager.createInteractiveContext();
+    console.log('Interactive context created successfully');
 
     // Small delay to ensure context is fully ready
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // Return connection info for noVNC access
-    // In a real deployment, this would include the actual noVNC URL
     const novncUrl = process.env.NOVNC_URL || 'http://localhost:8080/vnc.html';
 
     res.json({
@@ -88,10 +92,12 @@ app.post('/login/interactive', async (req, res) => {
       contextId: Date.now().toString()
     });
   } catch (error) {
-    console.error('Interactive login error:', error);
+    console.error('Interactive login error:', error.message);
+    console.error('Error details:', error);
     res.status(500).json({
       success: false,
       error: error.message,
+      details: error.toString(),
       suggestion: 'Check browser launch configuration and Xvfb display'
     });
   }
@@ -178,7 +184,6 @@ app.post('/login/load', async (req, res) => {
   try {
     await playwrightManager.close(); // Close any existing session
     const { context, page } = await playwrightManager.loadAuthenticatedContext();
-
     res.json({
       success: true,
       message: 'Authentication state loaded'
