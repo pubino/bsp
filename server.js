@@ -67,11 +67,14 @@ app.post('/login/interactive', async (req, res) => {
     // Close any existing context to start fresh
     await playwrightManager.close();
 
+    // Small delay to ensure cleanup is complete
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     // Create new interactive context
     const { context, page } = await playwrightManager.createInteractiveContext();
 
-    // Navigate to a basic page to establish the session
-    await page.goto('about:blank');
+    // Small delay to ensure context is fully ready
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Return connection info for noVNC access
     // In a real deployment, this would include the actual noVNC URL
