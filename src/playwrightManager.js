@@ -32,10 +32,11 @@ class PlaywrightManager {
       throw new Error('Browser launch only allowed in container environment with DISPLAY=:99');
     }
 
+    console.log('Launching browser with display:', this.display);
+    console.log('DISPLAY environment variable:', process.env.DISPLAY);
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+
     try {
-      console.log('Launching browser with display:', this.display);
-      console.log('DISPLAY environment variable:', process.env.DISPLAY);
-      
       // Launch browser in headful mode for Docker/Xvfb compatibility
       this.browser = await chromium.launch({
         headless: false,
@@ -66,6 +67,8 @@ class PlaywrightManager {
       return this.browser;
     } catch (error) {
       console.error('Failed to launch browser:', error);
+      console.error('Error details:', error.message);
+      console.error('Error stack:', error.stack);
       throw error;
     }
   }
