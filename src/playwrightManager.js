@@ -1,0 +1,849 @@
+const { chromium } = require('playwright');
+const fs = require('fs').promises;
+const path = require('path');
+
+console.log('PlaywrightManager module loaded');
+
+class PlaywrightManager {
+  constructor() {
+    this.browser = null;
+    this.context = null;
+    this.page = null;
+    this.storageDir = path.join(process.cwd(), 'storage');
+    this.storageStatePath = path.join(this.storageDir, 'storageState.json');
+    this.display = process.env.DISPLAY || ':99';
+  }
+
+  async ensureStorageDir() {
+    try {
+      await fs.access(this.storageDir);
+    } catch {
+      await fs.mkdir(this.storageDir, { recursive: true });
+    }
+  }
+
+  async launchBrowser() {
+    if (this.browser) {
+      return this.browser;
+    }
+
+    try {
+      console.log('Launching browser with display:', this.display);
+      console.log('DISPLAY environment variable:', process.env.DISPLAY);
+      
+      // Launch browser in headful mode for Docker/Xvfb compatibility
+      this.browser = await chromium.launch({
+        headless: false,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          `--display=${this.display}`,
+          '--window-size=1280,720'
+        ]
+      });
+      console.log('Browser launched successfully with display:', this.display);
+      
+      // Verify browser is actually connected to our display
+      const pages = this.browser.contexts()[0]?.pages() || [];
+      console.log('Browser has', pages.length, 'pages after launch');
+      
+      // Wait a moment for browser to connect to display
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return this.browser;
+    } catch (error) {
+      console.error('Failed to launch browser:', error);
+      throw error;
+    }
+  }
+
+  async createInteractiveContext() {
+    console.log('Creating interactive context...');
+    await this.ensureStorageDir();
+    const browser = await this.launchBrowser();
+    console.log('Browser instance obtained:', !!browser);
+
+    // Create fresh context for interactive login (don't load existing storageState)
+    this.context = await browser.newContext({
+      viewport: { width: 1280, height: 720 }
+    });
+    console.log('Context created successfully');
+
+    this.page = await this.context.newPage();
+    console.log('Page created successfully');
+    
+    // Add event listeners to track navigation
+    this.page.on('framenavigated', frame => {
+      console.log('Frame navigated:', frame.url());
+    });
+    this.page.on('domcontentloaded', () => {
+      console.log('DOMContentLoaded event fired');
+    });
+    this.page.on('load', () => {
+      console.log('Load event fired');
+    });
+    
+    // For interactive login, start with about:blank and let user navigate manually
+    const defaultUrl = process.env.DEFAULT_LOGIN_URL || 'https://example.com/login';
+    console.log('Setting up interactive login for:', defaultUrl);
+    
+    try {
+      // Start with about:blank to avoid any automation detection
+      await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 });
+      console.log('Started with about:blank');
+      
+      // Don't try to navigate automatically - let the user do it manually
+      console.log('User will need to manually navigate to:', defaultUrl);
+      
+    } catch (error) {
+      console.error('Failed to initialize page:', error.message);
+    }
+    
+    console.log('Interactive context created - user must navigate manually');
+    return { context: this.context, page: this.page };
+  }
+
+  async loadAuthenticatedContext() {
+    await this.ensureStorageDir();
+    const browser = await this.launchBrowser();
+
+    try {
+      // Try to load existing authenticated context
+      const storageState = JSON.parse(await fs.readFile(this.storageStatePath, 'utf8'));
+      this.context = await browser.newContext({ storageState });
+      this.page = await this.context.newPage();
+      
+      // Navigate to the base URL to establish the session context
+      const baseUrl = process.env.BASE_URL;
+      if (baseUrl) {
+        console.log('Navigating to base URL after loading session:', baseUrl);
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      } else {
+        console.warn('BASE_URL not set, session may not work correctly');
+      }
+      
+      console.log('Authenticated context loaded');
+      return { context: this.context, page: this.page };
+    } catch (error) {
+      console.log('No valid storage state found, creating fresh context');
+      return await this.createInteractiveContext();
+    }
+  }
+
+  async saveStorageState() {
+    if (!this.context) {
+      throw new Error('No context available to save');
+    }
+
+    await this.ensureStorageDir();
+    const storageState = await this.context.storageState();
+    await fs.writeFile(this.storageStatePath, JSON.stringify(storageState, null, 2));
+    console.log('Storage state saved');
+  }
+
+  async checkAuthentication() {
+    if (!this.page) {
+      return { authenticated: false, reason: 'No active page' };
+    }
+
+    try {
+      // Check for Drupal admin indicators
+      const adminIndicators = [
+        'text=/Administration/',
+        'text=/Content/',
+        'text=/Structure/',
+        '[data-drupal-selector="edit-submit"]'
+      ];
+
+      for (const indicator of adminIndicators) {
+        try {
+          await this.page.waitForSelector(indicator, { timeout: 2000 });
+          return { authenticated: true, adminAccess: true };
+        } catch {
+          // Continue checking other indicators
+        }
+      }
+
+      // Check if we're on a login page
+      const loginIndicators = [
+        'text=/Log in/',
+        '[name="name"]',
+        '[name="pass"]'
+      ];
+
+      for (const indicator of loginIndicators) {
+        try {
+          await this.page.waitForSelector(indicator, { timeout: 2000 });
+          return { authenticated: false, reason: 'On login page' };
+        } catch {
+          // Continue checking
+        }
+      }
+
+      return { authenticated: false, reason: 'No authentication indicators found' };
+    } catch (error) {
+      return { authenticated: false, reason: `Error checking auth: ${error.message}` };
+    }
+  }
+
+  async takeScreenshot(filename = 'debug-screenshot.png') {
+    if (!this.page) {
+      throw new Error('No active page for screenshot');
+    }
+
+    const screenshotPath = path.join('/tmp', filename);
+    await this.page.screenshot({ path: screenshotPath, fullPage: true });
+    return screenshotPath;
+  }
+
+  async queryContentTypes() {
+    if (!this.page) {
+      throw new Error('No active page for content type query');
+    }
+
+    try {
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        throw new Error('BASE_URL environment variable is required for content type queries');
+      }
+
+      // Ensure we're on the correct domain
+      const currentUrl = this.page.url();
+      const currentDomain = new URL(currentUrl).hostname;
+      const targetDomain = new URL(baseUrl).hostname;
+
+      if (currentDomain !== targetDomain) {
+        console.log(`Current domain (${currentDomain}) doesn't match target (${targetDomain}), navigating to base URL`);
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      }
+
+      // First try the admin structure page
+      const adminUrl = `${baseUrl}/admin/structure/types`.replace(/\/$/, ''); // Remove trailing slash if present
+      console.log('Attempting to access content types via admin:', adminUrl);
+      
+      try {
+        await this.page.goto(adminUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        
+        // Check if we can access the admin page (look for the table)
+        const tableExists = await this.page.locator('table').count() > 0;
+        
+        if (tableExists) {
+          console.log('Successfully accessed admin content types page');
+          // Extract content type information from the admin table
+          const contentTypes = await this.page.evaluate(() => {
+            const table = document.querySelector('table');
+            if (!table) return [];
+
+            const rows = table.querySelectorAll('tbody tr');
+            const types = [];
+
+            rows.forEach(row => {
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 3) {
+                const nameCell = cells[0];
+                const machineNameCell = cells[1];
+                const descriptionCell = cells[2];
+
+                // Extract the machine name from the operations links
+                const operationsCell = cells[cells.length - 1];
+                const editLink = operationsCell.querySelector('a[href*="edit"]');
+                let machineName = '';
+                if (editLink) {
+                  const href = editLink.getAttribute('href');
+                  const match = href.match(/\/admin\/structure\/types\/manage\/([^\/]+)/);
+                  if (match) machineName = match[1];
+                }
+
+                types.push({
+                  name: nameCell.textContent.trim(),
+                  machineName: machineName || machineNameCell.textContent.trim(),
+                  description: descriptionCell.textContent.trim()
+                });
+              }
+            });
+
+            return types;
+          });
+
+          console.log(`Found ${contentTypes.length} content types via admin page`);
+          return {
+            success: true,
+            contentTypes: contentTypes,
+            count: contentTypes.length,
+            source: 'admin'
+          };
+        }
+      } catch (adminError) {
+        console.log('Admin content types page not accessible, trying /node/add fallback');
+      }
+      
+      // Fallback: Try /node/add page
+      const nodeAddUrl = `${baseUrl}/node/add`.replace(/\/$/, '');
+      console.log('Attempting to access content types via node/add:', nodeAddUrl);
+      
+      await this.page.goto(nodeAddUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      
+      // Extract content types from the node/add page
+      const contentTypes = await this.page.evaluate(() => {
+        // Look for content type links in various possible formats
+        const typeLinks = document.querySelectorAll('a[href*="/node/add/"]');
+        const types = [];
+        
+        typeLinks.forEach(link => {
+          const href = link.getAttribute('href');
+          const match = href.match(/\/node\/add\/([^\/\?]+)/);
+          if (match) {
+            const machineName = match[1];
+            // Skip if we already have this type
+            if (!types.find(t => t.machineName === machineName)) {
+        types.push({
+          name: link.textContent.trim(),
+          machineName: machineName,
+          description: '', // Description not available on node/add page
+          createUrl: href
+        });
+            }
+          }
+        });
+        
+        return types;
+      });
+
+      console.log(`Found ${contentTypes.length} content types via node/add page`);
+      return {
+        success: true,
+        contentTypes: contentTypes,
+        count: contentTypes.length,
+        source: 'node_add'
+      };
+    } catch (error) {
+      console.error('Error querying content types:', error);
+      return {
+        success: false,
+        error: error.message,
+        suggestion: 'Ensure BASE_URL is set and you are logged in with appropriate permissions'
+      };
+    }
+  }
+
+  async queryContent(limit = 10, contentType = null, page = 1) {
+    if (!this.page) {
+      throw new Error('No active page for content query');
+    }
+
+    try {
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        throw new Error('BASE_URL environment variable is required for content queries');
+      }
+
+      // Ensure we're on the correct domain
+      const currentUrl = this.page.url();
+      const currentDomain = new URL(currentUrl).hostname;
+      const targetDomain = new URL(baseUrl).hostname;
+
+      if (currentDomain !== targetDomain) {
+        console.log(`Current domain (${currentDomain}) doesn't match target (${targetDomain}), navigating to base URL`);
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      }
+
+      // Navigate to admin content page with pagination
+      let contentUrl = `${baseUrl}/admin/content`.replace(/\/$/, '');
+      if (page > 1) {
+        contentUrl += `?page=${page - 1}`; // Drupal uses 0-based page indexing
+      }
+      console.log('Navigating to admin content page:', contentUrl);
+      
+      await this.page.goto(contentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      // Wait for the content table to load
+      await this.page.waitForSelector('table', { timeout: 10000 });
+
+      // Extract content information from the table
+      const result = await this.page.evaluate(({ limit, contentType, page }) => {
+        console.log('Evaluating page content...');
+        
+        // Look for any table on the page
+        const tables = document.querySelectorAll('table');
+        console.log(`Found ${tables.length} tables on the page`);
+        
+        if (tables.length === 0) {
+          console.log('No tables found on the page');
+          return { content: [], hasNextPage: false, hasPrevPage: page > 1 };
+        }
+
+        const table = tables[0]; // Use the first table
+        const rows = table.querySelectorAll('tbody tr');
+        console.log('Found', rows.length, 'rows in table');
+        
+        const contentItems = [];
+
+        for (let i = 0; i < Math.min(rows.length, limit); i++) {
+          const row = rows[i];
+          const cells = row.querySelectorAll('td');
+          console.log(`Row ${i}: Found ${cells.length} cells`);
+          
+          if (cells.length >= 3) {
+            // Extract data more flexibly
+            const cellTexts = Array.from(cells).map(cell => cell.textContent.trim());
+            console.log(`Row ${i} cell texts:`, cellTexts);
+            
+            // Parse the actual table structure for Drupal content admin
+            // Columns appear to be: Title, Content Path/Title, Type, Status, Updated+Author, Created+Author, Operations
+            const title = cellTexts[0] || 'Unknown';
+            const contentPath = cellTexts[1] || '';
+            const type = cellTexts[2] || 'Unknown';
+            const status = cellTexts[3] || 'Unknown';
+            
+            // Parse updated field (contains date + author)
+            const updatedField = cellTexts[4] || '';
+            const updatedMatch = updatedField.match(/^([^\n]+)/);
+            const updated = updatedMatch ? updatedMatch[1] : updatedField;
+            
+            // Parse author from updated field (usually after multiple newlines)
+            const authorMatch = updatedField.match(/\n\n\n([^\n]+)/);
+            const author = authorMatch ? authorMatch[1] : 'Unknown';
+            
+            // Parse created field
+            const createdField = cellTexts[5] || '';
+            const createdMatch = createdField.match(/^([^\n]+)/);
+            const created = createdMatch ? createdMatch[1] : createdField;
+            
+            // Look for edit URL in operations cell
+            const operationsCell = cells[6];
+            let editUrl = null;
+            if (operationsCell) {
+              const editLink = operationsCell.querySelector('a[href*="edit"]');
+              if (editLink) {
+                editUrl = editLink.getAttribute('href');
+              }
+            }
+
+            // Extract node ID from edit URL if available
+            let nodeId = null;
+            if (editUrl) {
+              const match = editUrl.match(/\/node\/(\d+)\//);
+              if (match) nodeId = parseInt(match[1]);
+            }
+
+            // Apply content type filter if specified
+            if (contentType && type.toLowerCase() !== contentType.toLowerCase()) {
+              continue;
+            }
+
+            contentItems.push({
+              id: nodeId,
+              title: title,
+              contentTitle: contentPath,
+              type: type,
+              status: status,
+              author: author,
+              updated: updated,
+              created: created,
+              editUrl: editUrl,
+              viewUrl: editUrl ? editUrl.replace('/edit', '') : null
+            });
+          }
+        }
+
+        // Check for pagination information
+        let hasNextPage = false;
+        let hasPrevPage = page > 1;
+        let totalPages = 1;
+        let totalItems = contentItems.length;
+        let currentPageRange = null;
+        
+        // Look for pagination elements (Drupal-specific patterns)
+        const pagerLinks = document.querySelectorAll('.pager a, .pagination a, a[title*="next"], a[title*="previous"], .pager__link');
+        const nextLinks = Array.from(pagerLinks).filter(link => 
+          link.textContent.toLowerCase().includes('next') || 
+          link.textContent.includes('›') ||
+          link.textContent.includes('»') ||
+          link.getAttribute('title')?.toLowerCase().includes('next') ||
+          link.classList.contains('pager__link--next')
+        );
+        
+        if (nextLinks.length > 0) {
+          hasNextPage = true;
+        }
+
+        // Extract total pages from pagination links (look for numbered page links)
+        const pageNumberLinks = Array.from(pagerLinks).filter(link => {
+          const text = link.textContent.trim();
+          const href = link.getAttribute('href') || '';
+          // Look for numeric links or links with page parameters
+          return /^\d+$/.test(text) || href.includes('page=');
+        });
+        
+        if (pageNumberLinks.length > 0) {
+          const pageNumbers = pageNumberLinks.map(link => {
+            const text = link.textContent.trim();
+            if (/^\d+$/.test(text)) {
+              return parseInt(text);
+            }
+            // Extract page number from href
+            const href = link.getAttribute('href') || '';
+            const match = href.match(/[?&]page=(\d+)/);
+            return match ? parseInt(match[1]) + 1 : null; // Convert 0-based to 1-based
+          }).filter(num => num !== null && !isNaN(num));
+          
+          if (pageNumbers.length > 0) {
+            totalPages = Math.max(...pageNumbers);
+          }
+        }
+
+        // Look for Drupal-specific pagination text patterns
+        const pagerTextElements = document.querySelectorAll('.pager .pager-text, .pagination-info, .pager-info, .pager__text');
+        for (const element of pagerTextElements) {
+          const text = element.textContent.trim();
+          console.log('Found pager text element:', text);
+          
+          // Try to extract total items from patterns like "Showing 1-50 of 250 items"
+          const totalMatch = text.match(/of\s+(\d+)\s+items?/i) || 
+                           text.match(/(\d+)\s+total/i) || 
+                           text.match(/total:?\s*(\d+)/i) ||
+                           text.match(/(\d+)\s+results?/i);
+          if (totalMatch) {
+            totalItems = parseInt(totalMatch[1]);
+          }
+          
+          // Extract current range
+          const rangeMatch = text.match(/showing\s+([\d\s\-]+)\s+of/i) || 
+                           text.match(/([\d\s\-]+)\s+of/i) ||
+                           text.match(/items?\s+([\d\s\-]+)/i);
+          if (rangeMatch) {
+            currentPageRange = rangeMatch[1].trim();
+          }
+        }
+
+        // Alternative: Look for any text containing item counts in the entire page
+        if (totalItems === contentItems.length) {
+          const allText = document.body.textContent;
+          const patterns = [
+            /of\s+(\d+)\s+items?/gi,
+            /(\d+)\s+total\s+items?/gi,
+            /total\s+items?:\s*(\d+)/gi,
+            /(\d+)\s+results?/gi
+          ];
+          
+          for (const pattern of patterns) {
+            const match = allText.match(pattern);
+            if (match) {
+              const num = parseInt(match[1]);
+              if (num > totalItems) {
+                totalItems = num;
+                break;
+              }
+            }
+          }
+        }
+
+        // If we still don't have total pages but have next page, estimate conservatively
+        if (totalPages === 1 && hasNextPage) {
+          totalPages = page + 1; // At minimum, current page + 1
+        }
+
+        console.log('Extracted', contentItems.length, 'content items');
+        console.log('Pagination info:', {
+          hasNextPage, 
+          hasPrevPage, 
+          totalPages, 
+          totalItems, 
+          currentPageRange
+        });
+        
+        return { 
+          content: contentItems, 
+          hasNextPage, 
+          hasPrevPage,
+          totalPages,
+          totalItems,
+          currentPageRange
+        };
+      }, { limit, contentType, page });
+
+      console.log(`Found ${result.content.length} content items on page ${page}`);
+      return {
+        success: true,
+        content: result.content,
+        count: result.content.length,
+        limit: limit,
+        page: page,
+        contentType: contentType,
+        pagination: {
+          currentPage: page,
+          hasNextPage: result.hasNextPage,
+          hasPrevPage: result.hasPrevPage,
+          totalPages: result.totalPages,
+          totalItems: result.totalItems,
+          currentPageRange: result.currentPageRange
+        }
+      };
+    } catch (error) {
+      console.error('Error querying content:', error);
+      return {
+        success: false,
+        error: error.message,
+        suggestion: 'Ensure BASE_URL is set and you are logged in with appropriate permissions'
+      };
+    }
+  }
+
+  async close() {
+    if (this.page) {
+      await this.page.close();
+      this.page = null;
+    }
+    if (this.context) {
+      await this.context.close();
+      this.context = null;
+    }
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
+    }
+  }
+
+  /**
+   * Get detailed content information by node ID
+   * Tries edit interface first, falls back to view interface
+   */
+  async getContentDetail(nodeId) {
+    try {
+      console.log('DEBUG: getContentDetail method STARTED with nodeId:', nodeId);
+      const fs = require('fs');
+      fs.appendFileSync('/tmp/content_detail.log', `getContentDetail called with nodeId: ${nodeId}\n`);
+
+      if (!this.page) {
+        fs.appendFileSync('/tmp/content_detail.log', 'No active page available\n');
+        throw new Error('No active page for content detail extraction');
+      }
+
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        fs.appendFileSync('/tmp/content_detail.log', 'BASE_URL not set\n');
+        throw new Error('BASE_URL environment variable is required for content detail extraction');
+      }
+
+      fs.appendFileSync('/tmp/content_detail.log', `BASE_URL: ${baseUrl}\n`);
+      fs.appendFileSync('/tmp/content_detail.log', `Current page URL before navigation: ${await this.page.url()}\n`);
+
+      // Always navigate to base URL first to ensure we're on the correct domain
+      fs.appendFileSync('/tmp/content_detail.log', `Navigating to base URL: ${baseUrl}\n`);
+      await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      fs.appendFileSync('/tmp/content_detail.log', `After base URL navigation, current URL: ${await this.page.url()}\n`);
+
+      // Try edit interface first
+      const editUrl = `${baseUrl}/node/${nodeId}/edit`.replace(/\/$/, '');
+      fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via edit URL: ${editUrl}\n`);
+
+      try {
+        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to edit URL...\n');
+        await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        fs.appendFileSync('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
+
+        // Check if we successfully reached the edit page
+        const currentUrl = this.page.url();
+        const isEditPage = currentUrl.includes(`/node/${nodeId}/edit`) || currentUrl.includes('edit');
+
+        if (isEditPage) {
+          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
+
+          // Extract content using schema-based approach or fallback
+          const contentData = await this.extractContentFromPage(nodeId, 'edit');
+          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          return {
+            success: true,
+            content: contentData
+          };
+        } else {
+          fs.appendFileSync('/tmp/content_detail.log', `Edit page not accessible, current URL: ${currentUrl}\n`);
+          throw new Error('Edit page not accessible');
+        }
+      } catch (editError) {
+        fs.appendFileSync('/tmp/content_detail.log', `Edit interface not accessible: ${editError.message}\n`);
+
+        // Fallback to view interface
+        const viewUrl = `${baseUrl}/node/${nodeId}`.replace(/\/$/, '');
+        fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
+
+        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to view URL...\n');
+        await this.page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        fs.appendFileSync('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
+
+        // Check if we reached the view page
+        const currentUrl = this.page.url();
+        const isViewPage = currentUrl.includes(`/node/${nodeId}`) && !currentUrl.includes('/edit');
+
+        if (isViewPage) {
+          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
+
+          // Extract content using schema-based approach or fallback
+          const contentData = await this.extractContentFromPage(nodeId, 'view');
+          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          return {
+            success: true,
+            content: contentData
+          };
+        } else {
+          fs.appendFileSync('/tmp/content_detail.log', `View page not accessible either, current URL: ${currentUrl}\n`);
+          throw new Error('Could not access content via edit or view interfaces');
+        }
+      }
+    } catch (error) {
+      const fs = require('fs');
+      fs.appendFileSync('/tmp/content_detail.log', `Error getting content detail: ${error.message}\n`);
+      return {
+        success: false,
+        error: error.message,
+        nodeId: nodeId
+      };
+    }
+  }
+
+  /**
+   * Extract content data from the current page using schema or fallback methods
+   */
+  async extractContentFromPage(nodeId, interfaceType) {
+    console.log(`Extracting content from ${interfaceType} interface`);
+
+    try {
+      // First try schema-based extraction
+      const schemaData = await this.extractContentViaSchema(nodeId, interfaceType);
+      if (schemaData && Object.keys(schemaData.data).length > 0) {
+        console.log('Successfully extracted content via schema');
+        return schemaData;
+      }
+
+      console.log('Schema extraction failed or returned no data, trying fallback extraction');
+      // Fallback to generic content extraction
+      const fallbackData = await this.extractContentViaFallback(nodeId, interfaceType);
+      return fallbackData;
+
+    } catch (error) {
+      console.error('Error extracting content from page:', error);
+      // Return basic information even if extraction fails
+      return {
+        nodeId: nodeId,
+        title: await this.page.title(),
+        url: this.page.url(),
+        interface: interfaceType,
+        data: {},
+        extractedAt: new Date().toISOString(),
+        extractionError: error.message
+      };
+    }
+  }
+
+  /**
+   * Extract content using JSON schema definitions
+   */
+  async extractContentViaSchema(nodeId, interfaceType) {
+    console.log('Attempting schema-based extraction');
+
+    try {
+      // Load schema for this content type (this would need to be implemented based on your schema files)
+      // For now, return empty data to trigger fallback
+      const schemaData = {
+        nodeId: nodeId,
+        title: await this.page.title(),
+        url: this.page.url(),
+        interface: interfaceType,
+        data: {}, // Would be populated based on schema
+        extractedAt: new Date().toISOString(),
+        extractionMethod: 'schema'
+      };
+
+      return schemaData;
+    } catch (error) {
+      console.error('Schema extraction failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Extract content using fallback methods (DOM scraping)
+   */
+  async extractContentViaFallback(nodeId, interfaceType) {
+    console.log('Attempting fallback content extraction');
+
+    const contentData = await this.page.evaluate(({ nodeId, interfaceType }) => {
+      const data = {};
+
+      // Extract title
+      const titleElement = document.querySelector('h1') || document.querySelector('.page-title') || document.querySelector('title');
+      data.title = titleElement ? titleElement.textContent.trim() : document.title;
+
+      // Extract body content
+      const bodySelectors = ['.field--name-body', '.node__content', 'article .content', '.content', '#content'];
+      for (const selector of bodySelectors) {
+        const element = document.querySelector(selector);
+        if (element) {
+          data.body = element.textContent.trim();
+          break;
+        }
+      }
+
+      // Extract common fields based on interface
+      if (interfaceType === 'edit') {
+        // Extract from form fields
+        const formFields = document.querySelectorAll('input[name], textarea[name], select[name]');
+        formFields.forEach(field => {
+          const name = field.name;
+          const value = field.value || field.textContent;
+          if (name && value) {
+            data[name] = value.trim();
+          }
+        });
+      } else {
+        // Extract from view page structure
+        const fieldSelectors = [
+          '.field--name-field-summary',
+          '.field--name-field-tags',
+          '.field--name-field-category',
+          '.field--name-created',
+          '.field--name-changed'
+        ];
+
+        fieldSelectors.forEach(selector => {
+          const element = document.querySelector(selector);
+          if (element) {
+            const label = element.querySelector('.field__label');
+            const value = element.querySelector('.field__item') || element;
+            const fieldName = label ? label.textContent.trim().toLowerCase().replace(/\s+/g, '_') : selector.split('--name-')[1];
+            data[fieldName] = value.textContent.trim();
+          }
+        });
+      }
+
+      return data;
+    }, { nodeId, interfaceType });
+
+    return {
+      nodeId: nodeId,
+      title: await this.page.title(),
+      url: this.page.url(),
+      interface: interfaceType,
+      data: contentData,
+      extractedAt: new Date().toISOString(),
+      extractionMethod: 'fallback'
+    };
+  }
+
+  isReady() {
+    return !!(this.browser && this.context && this.page);
+  }
+}
+
+module.exports = PlaywrightManager;
