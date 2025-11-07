@@ -355,9 +355,22 @@ Below are two small examples (curl and Node.js) showing how to fetch the most re
 1) curl (shell)
 
 ```bash
-# Fetch the latest event (limit=1, type=event) and extract node id
-LATEST_NODE_ID=$(curl -s "http://localhost:3000/content?limit=1&type=event" \
-  | jq -r '.content[0].nodeId')
+# Fetch the latest event JSON
+LIST_JSON=$(curl -s "http://localhost:3000/content?limit=1&type=event")
+
+# Try extracting numeric id from `id` field, otherwise parse it out of `viewUrl` or `editUrl`
+LATEST_NODE_ID=$(echo "$LIST_JSON" | jq -r '.content[0].id // empty')
+if [ -z "$LATEST_NODE_ID" ]; then
+  # fallback: extract from viewUrl (e.g. "/node/11831?...") or editUrl
+  LATEST_NODE_ID=$(echo "$LIST_JSON" | jq -r '.content[0].viewUrl // .content[0].editUrl // empty' \
+    | sed -E 's|.*/node/([0-9]+).*|\1|')
+fi
+
+if [ -z "$LATEST_NODE_ID" ]; then
+  echo "Could not determine node id from response:" >&2
+  echo "$LIST_JSON" | jq
+  exit 1
+fi
 
 echo "Latest event node id: $LATEST_NODE_ID"
 
@@ -367,42 +380,58 @@ curl -s "http://localhost:3000/content/detail/$LATEST_NODE_ID" | jq
 
 2) Node.js (node-fetch)
 
-Create a small script `examples/get-latest-event.js` (or run inline):
+Create a small script `examples/get-latest-event.js` (or run inline). This version is defensive: it looks for `id` then falls back to parsing `viewUrl`/`editUrl` for `/node/<id>`.
 
 ```javascript
 import fetch from 'node-fetch';
 
+function extractIdFromItem(item = {}) {
+  if (item.id) return String(item.id);
+  const candidates = [item.viewUrl, item.editUrl];
+  for (const s of candidates) {
+    if (!s) continue;
+    const m = s.match(/\/node\/(\d+)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 async function getLatestEventDetails() {
-  // 1) fetch latest event (type=event, limit=1)
   const listRes = await fetch('http://localhost:3000/content?limit=1&type=event');
   const listJson = await listRes.json();
 
-  if (!listJson || !listJson.content || listJson.content.length === 0) {
+  if (!listJson || !Array.isArray(listJson.content) || listJson.content.length === 0) {
     console.log('No events found');
     return;
   }
 
-  const nodeId = listJson.content[0].nodeId;
+  const item = listJson.content[0];
+  const nodeId = extractIdFromItem(item);
+  if (!nodeId) {
+    console.error('Could not determine node id from item:', item);
+    return;
+  }
+
   console.log('Found latest event nodeId=', nodeId);
 
-  // 2) fetch detail for that node id
   const detailRes = await fetch(`http://localhost:3000/content/detail/${nodeId}`);
   const detailJson = await detailRes.json();
 
-  if (!detailJson.success) {
+  if (!detailJson || !detailJson.success) {
     console.error('Failed to fetch detail for node', nodeId, detailJson);
     return;
   }
 
-  // Extract common event fields (schema-dependent)
+  // The detail payload places meaningful fields under `content.data` or similar.
   const content = detailJson.content || {};
   const data = content.data || {};
 
-  const title = data.title || content.title || '(no title)';
+  // Try common keys but fall back gracefully
+  const title = data.title || content.title || item.title || '(no title)';
   const start = data.start || data.start_time || data.date || null;
   const end = data.end || data.end_time || null;
   const location = data.location || data.venue || null;
-  const category = data.category || data.type || content.contentType || null;
+  const category = data.category || data.type || content.contentType || item.type || null;
 
   console.log('Event details:');
   console.log('  title:', title);
@@ -416,8 +445,8 @@ getLatestEventDetails().catch(err => console.error(err));
 ```
 
 Notes:
-- Field names for event start/end and location may vary by site schema. The example above attempts several common keys (`start`, `start_time`, `date`, `location`, `venue`, etc.) to be forgiving across sites.
-- The Node example uses ESM `import`; run with `node --experimental-modules examples/get-latest-event.js` or adapt to `require('node-fetch')` if using CommonJS.
+- The API list response sometimes uses `id` (as in your sample) or provides `viewUrl`/`editUrl` that include `/node/<id>`; the examples above attempt both strategies.
+- Field names for event start/end and location may vary by site schema; the Node example attempts several common keys to be forgiving across sites.
 
 **Real Example Output:**
 ```bash
