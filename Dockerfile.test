@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     libatk1.0-0 \
     libatspi2.0-0 \
     libdrm2 \
+    libgbm1 \
     libgtk-3-0 \
     libnspr4 \
     libnss3 \
