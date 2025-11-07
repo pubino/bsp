@@ -1,6 +1,6 @@
 # Build Sites Programmatically (BSP)
 
-An overlay API for the Drupal UI for when the actual API is MIA.
+An API for the Drupal UI when the actual API is MIA.
 
 ## Features
 
