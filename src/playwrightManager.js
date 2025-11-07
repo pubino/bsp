@@ -686,7 +686,7 @@ class PlaywrightManager {
         if (isEditPage) {
           fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
 
-          // Extract content using schema-based approach or fallback
+          // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'edit');
           fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
@@ -715,7 +715,7 @@ class PlaywrightManager {
         if (isViewPage) {
           fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
 
-          // Extract content using schema-based approach or fallback
+          // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'view');
           fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
@@ -739,23 +739,15 @@ class PlaywrightManager {
   }
 
   /**
-   * Extract content data from the current page using schema or fallback methods
+   * Extract content data from the current page using DOM scraping
    */
   async extractContentFromPage(nodeId, interfaceType) {
     console.log(`Extracting content from ${interfaceType} interface`);
 
     try {
-      // First try schema-based extraction
-      const schemaData = await this.extractContentViaSchema(nodeId, interfaceType);
-      if (schemaData && Object.keys(schemaData.data).length > 0) {
-        console.log('Successfully extracted content via schema');
-        return schemaData;
-      }
-
-      console.log('Schema extraction failed or returned no data, trying fallback extraction');
-      // Fallback to generic content extraction
-      const fallbackData = await this.extractContentViaFallback(nodeId, interfaceType);
-      return fallbackData;
+      // Use robust fallback extraction method
+      const contentData = await this.extractContentViaFallback(nodeId, interfaceType);
+      return contentData;
 
     } catch (error) {
       console.error('Error extracting content from page:', error);
@@ -769,32 +761,6 @@ class PlaywrightManager {
         extractedAt: new Date().toISOString(),
         extractionError: error.message
       };
-    }
-  }
-
-  /**
-   * Extract content using JSON schema definitions
-   */
-  async extractContentViaSchema(nodeId, interfaceType) {
-    console.log('Attempting schema-based extraction');
-
-    try {
-      // Load schema for this content type (this would need to be implemented based on your schema files)
-      // For now, return empty data to trigger fallback
-      const schemaData = {
-        nodeId: nodeId,
-        title: await this.page.title(),
-        url: this.page.url(),
-        interface: interfaceType,
-        data: {}, // Would be populated based on schema
-        extractedAt: new Date().toISOString(),
-        extractionMethod: 'schema'
-      };
-
-      return schemaData;
-    } catch (error) {
-      console.error('Schema extraction failed:', error);
-      return null;
     }
   }
 
