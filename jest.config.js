@@ -10,5 +10,7 @@ module.exports = {
   ],
   setupFilesAfterEnv: [],
   testTimeout: 30000, // 30 second timeout for integration tests
-  verbose: true
+  verbose: true,
+  forceExit: true, // Force exit to prevent hanging
+  detectOpenHandles: true // Detect open handles that prevent exit
 };

@@ -600,18 +600,39 @@ class PlaywrightManager {
   }
 
   async close() {
-    if (this.page) {
-      await this.page.close();
-      this.page = null;
+    console.log('Closing PlaywrightManager resources...');
+    
+    try {
+      if (this.page) {
+        await this.page.close();
+        this.page = null;
+        console.log('Page closed');
+      }
+    } catch (error) {
+      console.error('Error closing page:', error.message);
     }
-    if (this.context) {
-      await this.context.close();
-      this.context = null;
+
+    try {
+      if (this.context) {
+        await this.context.close();
+        this.context = null;
+        console.log('Context closed');
+      }
+    } catch (error) {
+      console.error('Error closing context:', error.message);
     }
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
+
+    try {
+      if (this.browser) {
+        await this.browser.close();
+        this.browser = null;
+        console.log('Browser closed');
+      }
+    } catch (error) {
+      console.error('Error closing browser:', error.message);
     }
+
+    console.log('PlaywrightManager cleanup completed');
   }
 
   /**
