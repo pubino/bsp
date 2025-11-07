@@ -42,9 +42,6 @@ services:
       - NOVNC_URL=http://localhost:8080/vnc.html
       - BASE_URL=https://example.com
       - DEFAULT_LOGIN_URL=https://example.com/login
-    depends_on:
-      drupal-ui-automation:
-        condition: service_healthy
     # Override the entrypoint to run tests directly without supervisord
     entrypoint: ["sh", "-c", "npm run test:all"]
     profiles:
