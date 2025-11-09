@@ -312,6 +312,60 @@ app.get('/content/detail/:nodeId', async (req, res) => {
   }
 });
 
+// Update content by node ID
+app.put('/content/:nodeId', async (req, res) => {
+  const fs = require('fs');
+  fs.appendFileSync('/tmp/debug.log', `PUT /content/:nodeId route hit with params: ${JSON.stringify(req.params)}\n`);
+  fs.appendFileSync('/tmp/debug.log', `Request body: ${JSON.stringify(req.body)}\n`);
+
+  try {
+    if (!playwrightManager.isReady()) {
+      fs.appendFileSync('/tmp/debug.log', 'Manager not ready\n');
+      return res.status(400).json({
+        success: false,
+        error: 'No active browser session. Call /login/interactive first.'
+      });
+    }
+
+    fs.appendFileSync('/tmp/debug.log', 'Parsing nodeId\n');
+    const nodeId = parseInt(req.params.nodeId);
+    fs.appendFileSync('/tmp/debug.log', `Parsed nodeId: ${nodeId}\n`);
+
+    if (isNaN(nodeId) || nodeId < 1) {
+      fs.appendFileSync('/tmp/debug.log', 'Invalid nodeId\n');
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid node ID. Must be a positive integer.'
+      });
+    }
+
+    // Validate that updates object is provided
+    if (!req.body || typeof req.body !== 'object' || Object.keys(req.body).length === 0) {
+      fs.appendFileSync('/tmp/debug.log', 'No updates provided\n');
+      return res.status(400).json({
+        success: false,
+        error: 'No updates provided. Request body must contain field updates as key-value pairs.'
+      });
+    }
+
+    fs.appendFileSync('/tmp/debug.log', 'Calling updateContent\n');
+    const result = await playwrightManager.updateContent(nodeId, req.body);
+    fs.appendFileSync('/tmp/debug.log', `updateContent returned: ${JSON.stringify(result)}\n`);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    fs.appendFileSync('/tmp/debug.log', `Content update error: ${error.message}\n`);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Get content list with pagination and filtering
 app.get('/content', async (req, res) => {
   try {

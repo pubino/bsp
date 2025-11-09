@@ -839,6 +839,253 @@ class PlaywrightManager {
   isReady() {
     return !!(this.browser && this.context && this.page);
   }
+
+  /**
+   * Update content by node ID
+   * Navigates to edit page and updates fields based on provided data
+   */
+  async updateContent(nodeId, updates) {
+    try {
+      console.log('DEBUG: updateContent method STARTED with nodeId:', nodeId);
+      const fs = require('fs');
+      fs.appendFileSync('/tmp/content_update.log', `updateContent called with nodeId: ${nodeId}\n`);
+      fs.appendFileSync('/tmp/content_update.log', `Updates: ${JSON.stringify(updates)}\n`);
+
+      if (!this.page) {
+        fs.appendFileSync('/tmp/content_update.log', 'No active page available\n');
+        throw new Error('No active page for content update');
+      }
+
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        fs.appendFileSync('/tmp/content_update.log', 'BASE_URL not set\n');
+        throw new Error('BASE_URL environment variable is required for content update');
+      }
+
+      // Navigate to edit page
+      const editUrl = `${baseUrl}/node/${nodeId}/edit`.replace(/\/$/, '');
+      fs.appendFileSync('/tmp/content_update.log', `Navigating to edit URL: ${editUrl}\n`);
+
+      await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      // Wait for the form to be fully loaded
+      await this.page.waitForSelector('form', { timeout: 10000 });
+      fs.appendFileSync('/tmp/content_update.log', 'Edit form loaded\n');
+
+      // Check if we successfully reached the edit page
+      const currentUrl = this.page.url();
+      const isEditPage = currentUrl.includes(`/node/${nodeId}/edit`) || currentUrl.includes('edit');
+
+      if (!isEditPage) {
+        throw new Error(`Could not access edit page for node ${nodeId}. Current URL: ${currentUrl}`);
+      }
+
+      // Load schema for content type if available
+      const contentType = await this.detectContentType();
+      fs.appendFileSync('/tmp/content_update.log', `Detected content type: ${contentType}\n`);
+
+      const schema = await this.loadSchemaForContentType(contentType);
+      fs.appendFileSync('/tmp/content_update.log', `Schema loaded: ${schema ? 'yes' : 'no'}\n`);
+
+      // Update fields based on schema or field names
+      const updateResults = await this.updateFormFields(updates, schema);
+      fs.appendFileSync('/tmp/content_update.log', `Fields updated: ${JSON.stringify(updateResults)}\n`);
+
+      // Submit the form
+      fs.appendFileSync('/tmp/content_update.log', 'Submitting form...\n');
+
+      // Look for the Save button (Drupal typically uses "Save" as button text)
+      const saveButton = this.page.locator('input[type="submit"][value*="Save"], button[type="submit"]:has-text("Save")').first();
+
+      if (await saveButton.count() > 0) {
+        await saveButton.click();
+
+        // Wait for navigation or success message
+        // Drupal typically redirects to the view page after save
+        try {
+          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch (error) {
+          // If networkidle times out, that's okay - check for success message
+          console.log('Network idle timeout, checking for success indicators');
+        }
+
+        fs.appendFileSync('/tmp/content_update.log', 'Form submitted successfully\n');
+
+        return {
+          success: true,
+          nodeId: nodeId,
+          message: `Content ${nodeId} updated successfully`,
+          updatedFields: updateResults.updated,
+          skippedFields: updateResults.skipped,
+          redirectUrl: this.page.url()
+        };
+      } else {
+        throw new Error('Could not find Save button on edit form');
+      }
+
+    } catch (error) {
+      const fs = require('fs');
+      fs.appendFileSync('/tmp/content_update.log', `Error updating content: ${error.message}\n`);
+      return {
+        success: false,
+        error: error.message,
+        nodeId: nodeId
+      };
+    }
+  }
+
+  /**
+   * Detect content type from edit page
+   */
+  async detectContentType() {
+    try {
+      // Try to get content type from form data-drupal-selector or URL
+      const contentType = await this.page.evaluate(() => {
+        // Check form class or data attributes
+        const form = document.querySelector('form[data-drupal-selector*="node-"]');
+        if (form) {
+          const selector = form.getAttribute('data-drupal-selector') || '';
+          const match = selector.match(/node-([a-z0-9_]+)-/);
+          if (match) return match[1];
+        }
+
+        // Check for content type in form action or other attributes
+        const formAction = document.querySelector('form')?.action || '';
+        const urlMatch = formAction.match(/\/node\/add\/([a-z0-9_]+)/);
+        if (urlMatch) return urlMatch[1];
+
+        return null;
+      });
+
+      return contentType || 'unknown';
+    } catch (error) {
+      console.error('Error detecting content type:', error);
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Load schema for a content type
+   */
+  async loadSchemaForContentType(contentType) {
+    try {
+      const schemaPath = path.join(process.cwd(), 'schemas', `${contentType}.json`);
+      const schemaContent = await fs.readFile(schemaPath, 'utf8');
+      return JSON.parse(schemaContent);
+    } catch (error) {
+      console.log(`No schema found for content type: ${contentType}`);
+      return null;
+    }
+  }
+
+  /**
+   * Update form fields based on provided updates and optional schema
+   */
+  async updateFormFields(updates, schema) {
+    const updated = [];
+    const skipped = [];
+
+    for (const [fieldName, fieldValue] of Object.entries(updates)) {
+      try {
+        let selector = null;
+        let fieldType = 'text';
+
+        // If schema is available, use it to get the selector and type
+        if (schema && schema.fields && schema.fields[fieldName]) {
+          selector = schema.fields[fieldName].selector;
+          fieldType = schema.fields[fieldName].type || 'text';
+        } else {
+          // Try to guess the selector based on common Drupal patterns
+          selector = `[name="${fieldName}[0][value]"]`;
+        }
+
+        console.log(`Attempting to update field: ${fieldName} with selector: ${selector}`);
+
+        // Check if field exists
+        const fieldExists = await this.page.locator(selector).count() > 0;
+
+        if (!fieldExists) {
+          // Try alternative selectors
+          const altSelectors = [
+            `[name="${fieldName}"]`,
+            `[name="${fieldName}[value]"]`,
+            `[id*="${fieldName}"]`,
+            `[name*="${fieldName}"]`
+          ];
+
+          let found = false;
+          for (const altSelector of altSelectors) {
+            if (await this.page.locator(altSelector).count() > 0) {
+              selector = altSelector;
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) {
+            skipped.push({ field: fieldName, reason: 'Field not found' });
+            continue;
+          }
+        }
+
+        // Detect if the field is actually a checkbox by checking the element
+        const element = this.page.locator(selector).first();
+        const elementType = await element.getAttribute('type').catch(() => null);
+
+        // Override fieldType if we detect it's actually a checkbox
+        if (elementType === 'checkbox') {
+          fieldType = 'checkbox';
+        }
+
+        // Update field based on type
+        switch (fieldType) {
+          case 'text':
+          case 'textarea':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          case 'checkbox':
+            // Convert various truthy/falsy values
+            const shouldCheck = fieldValue === true ||
+                               fieldValue === '1' ||
+                               fieldValue === 1 ||
+                               String(fieldValue).toLowerCase() === 'true';
+
+            if (shouldCheck) {
+              await this.page.locator(selector).check();
+            } else {
+              await this.page.locator(selector).uncheck();
+            }
+            break;
+
+          case 'select':
+            await this.page.locator(selector).selectOption(String(fieldValue));
+            break;
+
+          case 'date':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          case 'time':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          default:
+            await this.page.locator(selector).fill(String(fieldValue));
+        }
+
+        updated.push({ field: fieldName, value: fieldValue });
+        console.log(`Successfully updated field: ${fieldName}`);
+
+      } catch (error) {
+        console.error(`Error updating field ${fieldName}:`, error.message);
+        skipped.push({ field: fieldName, reason: error.message });
+      }
+    }
+
+    return { updated, skipped };
+  }
 }
 
 module.exports = PlaywrightManager;
