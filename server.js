@@ -4,6 +4,17 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const PlaywrightManager = require('./src/playwrightManager');
 
+// Debug flag for server logging
+const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
+const fsSync = require('fs'); // For synchronous debug logging
+
+// Debug logging helper
+function debugLog(message) {
+  if (DEBUG_LOGGING) {
+    fsSync.appendFileSync('/tmp/debug.log', `${message}\n`);
+  }
+}
+
 console.log('Server.js starting...');
 
 const app = express();
@@ -314,25 +325,24 @@ app.get('/content/detail/:nodeId', async (req, res) => {
 
 // Update content by node ID
 app.put('/content/:nodeId', async (req, res) => {
-  const fs = require('fs');
-  fs.appendFileSync('/tmp/debug.log', `PUT /content/:nodeId route hit with params: ${JSON.stringify(req.params)}\n`);
-  fs.appendFileSync('/tmp/debug.log', `Request body: ${JSON.stringify(req.body)}\n`);
+  debugLog(`PUT /content/:nodeId route hit with params: ${JSON.stringify(req.params)}`);
+  debugLog(`Request body: ${JSON.stringify(req.body)}`);
 
   try {
     if (!playwrightManager.isReady()) {
-      fs.appendFileSync('/tmp/debug.log', 'Manager not ready\n');
+      debugLog('Manager not ready');
       return res.status(400).json({
         success: false,
         error: 'No active browser session. Call /login/interactive first.'
       });
     }
 
-    fs.appendFileSync('/tmp/debug.log', 'Parsing nodeId\n');
+    debugLog('Parsing nodeId');
     const nodeId = parseInt(req.params.nodeId);
-    fs.appendFileSync('/tmp/debug.log', `Parsed nodeId: ${nodeId}\n`);
+    debugLog(`Parsed nodeId: ${nodeId}`);
 
     if (isNaN(nodeId) || nodeId < 1) {
-      fs.appendFileSync('/tmp/debug.log', 'Invalid nodeId\n');
+      debugLog('Invalid nodeId');
       return res.status(400).json({
         success: false,
         error: 'Invalid node ID. Must be a positive integer.'
@@ -341,16 +351,16 @@ app.put('/content/:nodeId', async (req, res) => {
 
     // Validate that updates object is provided
     if (!req.body || typeof req.body !== 'object' || Object.keys(req.body).length === 0) {
-      fs.appendFileSync('/tmp/debug.log', 'No updates provided\n');
+      debugLog('No updates provided');
       return res.status(400).json({
         success: false,
         error: 'No updates provided. Request body must contain field updates as key-value pairs.'
       });
     }
 
-    fs.appendFileSync('/tmp/debug.log', 'Calling updateContent\n');
+    debugLog('Calling updateContent');
     const result = await playwrightManager.updateContent(nodeId, req.body);
-    fs.appendFileSync('/tmp/debug.log', `updateContent returned: ${JSON.stringify(result)}\n`);
+    debugLog(`updateContent returned: ${JSON.stringify(result)}`);
 
     if (result.success) {
       res.json(result);
@@ -358,7 +368,7 @@ app.put('/content/:nodeId', async (req, res) => {
       res.status(500).json(result);
     }
   } catch (error) {
-    fs.appendFileSync('/tmp/debug.log', `Content update error: ${error.message}\n`);
+    debugLog(`Content update error: ${error.message}`);
     res.status(500).json({
       success: false,
       error: error.message
