@@ -7,9 +7,8 @@
  * of Drupal content across multiple pages.
  *
  * Usage: node examples/batch-processor.js
+ * Requires: Node.js 18+ (uses built-in fetch)
  */
-
-const fetch = require('node-fetch');
 
 class DrupalContentBatchProcessor {
   constructor(baseUrl = 'http://localhost:3000') {

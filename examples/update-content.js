@@ -12,10 +12,8 @@
  * Prerequisites:
  * - Docker container running: docker-compose up -d
  * - Authenticated session saved: POST /login/save
- * - Node.js 18+
+ * - Node.js 18+ (uses built-in fetch)
  */
-
-const fetch = require('node-fetch');
 
 const API_BASE = process.env.API_BASE || 'http://localhost:3000';
 const NODE_ID = process.env.NODE_ID || '123'; // Change to a valid node ID
