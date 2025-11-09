@@ -18,7 +18,8 @@ describe('PlaywrightManager - Content Update', () => {
       uncheck: jest.fn().mockResolvedValue(undefined),
       selectOption: jest.fn().mockResolvedValue(undefined),
       click: jest.fn().mockResolvedValue(undefined),
-      first: jest.fn().mockReturnThis()
+      first: jest.fn().mockReturnThis(),
+      getAttribute: jest.fn().mockResolvedValue('text') // Default to text type
     };
 
     // Create mock page
@@ -198,6 +199,9 @@ describe('PlaywrightManager - Content Update', () => {
     });
 
     test('should update checkbox fields', async () => {
+      // Mock getAttribute to return 'checkbox' for this test
+      mockLocator.getAttribute.mockResolvedValue('checkbox');
+
       const result = await manager.updateFormFields(
         { status: true },
         {
@@ -215,6 +219,9 @@ describe('PlaywrightManager - Content Update', () => {
     });
 
     test('should uncheck checkbox when value is false', async () => {
+      // Mock getAttribute to return 'checkbox' for this test
+      mockLocator.getAttribute.mockResolvedValue('checkbox');
+
       const result = await manager.updateFormFields(
         { status: false },
         {
@@ -289,6 +296,8 @@ describe('PlaywrightManager - Content Update', () => {
     });
 
     test('should handle errors during field update', async () => {
+      // Mock getAttribute to succeed, but fill to fail
+      mockLocator.getAttribute.mockResolvedValue('text');
       mockLocator.fill.mockRejectedValue(new Error('Fill failed'));
 
       const result = await manager.updateFormFields(
