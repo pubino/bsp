@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const fs = require('fs').promises;
+const fsSync = require('fs'); // For synchronous operations like appendFileSync
 const path = require('path');
 
 console.log('PlaywrightManager module loaded');
@@ -650,89 +651,87 @@ class PlaywrightManager {
   async getContentDetail(nodeId) {
     try {
       console.log('DEBUG: getContentDetail method STARTED with nodeId:', nodeId);
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_detail.log', `getContentDetail called with nodeId: ${nodeId}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `getContentDetail called with nodeId: ${nodeId}\n`);
 
       if (!this.page) {
-        fs.appendFileSync('/tmp/content_detail.log', 'No active page available\n');
+        fsSync.appendFileSync('/tmp/content_detail.log', 'No active page available\n');
         throw new Error('No active page for content detail extraction');
       }
 
       // Get the base URL from environment
       const baseUrl = process.env.BASE_URL;
       if (!baseUrl) {
-        fs.appendFileSync('/tmp/content_detail.log', 'BASE_URL not set\n');
+        fsSync.appendFileSync('/tmp/content_detail.log', 'BASE_URL not set\n');
         throw new Error('BASE_URL environment variable is required for content detail extraction');
       }
 
-      fs.appendFileSync('/tmp/content_detail.log', `BASE_URL: ${baseUrl}\n`);
-      fs.appendFileSync('/tmp/content_detail.log', `Current page URL before navigation: ${await this.page.url()}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `BASE_URL: ${baseUrl}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `Current page URL before navigation: ${await this.page.url()}\n`);
 
       // Always navigate to base URL first to ensure we're on the correct domain
-      fs.appendFileSync('/tmp/content_detail.log', `Navigating to base URL: ${baseUrl}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `Navigating to base URL: ${baseUrl}\n`);
       await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      fs.appendFileSync('/tmp/content_detail.log', `After base URL navigation, current URL: ${await this.page.url()}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `After base URL navigation, current URL: ${await this.page.url()}\n`);
 
       // Try edit interface first
       const editUrl = `${baseUrl}/node/${nodeId}/edit`.replace(/\/$/, '');
-      fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via edit URL: ${editUrl}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `Attempting to access content via edit URL: ${editUrl}\n`);
 
       try {
-        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to edit URL...\n');
+        fsSync.appendFileSync('/tmp/content_detail.log', 'Navigating to edit URL...\n');
         await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        fs.appendFileSync('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
+        fsSync.appendFileSync('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we successfully reached the edit page
         const currentUrl = this.page.url();
         const isEditPage = currentUrl.includes(`/node/${nodeId}/edit`) || currentUrl.includes('edit');
 
         if (isEditPage) {
-          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
+          fsSync.appendFileSync('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
 
           // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'edit');
-          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          fsSync.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
             success: true,
             content: contentData
           };
         } else {
-          fs.appendFileSync('/tmp/content_detail.log', `Edit page not accessible, current URL: ${currentUrl}\n`);
+          fsSync.appendFileSync('/tmp/content_detail.log', `Edit page not accessible, current URL: ${currentUrl}\n`);
           throw new Error('Edit page not accessible');
         }
       } catch (editError) {
-        fs.appendFileSync('/tmp/content_detail.log', `Edit interface not accessible: ${editError.message}\n`);
+        fsSync.appendFileSync('/tmp/content_detail.log', `Edit interface not accessible: ${editError.message}\n`);
 
         // Fallback to view interface
         const viewUrl = `${baseUrl}/node/${nodeId}`.replace(/\/$/, '');
-        fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
+        fsSync.appendFileSync('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
 
-        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to view URL...\n');
+        fsSync.appendFileSync('/tmp/content_detail.log', 'Navigating to view URL...\n');
         await this.page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        fs.appendFileSync('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
+        fsSync.appendFileSync('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we reached the view page
         const currentUrl = this.page.url();
         const isViewPage = currentUrl.includes(`/node/${nodeId}`) && !currentUrl.includes('/edit');
 
         if (isViewPage) {
-          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
+          fsSync.appendFileSync('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
 
           // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'view');
-          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          fsSync.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
             success: true,
             content: contentData
           };
         } else {
-          fs.appendFileSync('/tmp/content_detail.log', `View page not accessible either, current URL: ${currentUrl}\n`);
+          fsSync.appendFileSync('/tmp/content_detail.log', `View page not accessible either, current URL: ${currentUrl}\n`);
           throw new Error('Could not access content via edit or view interfaces');
         }
       }
     } catch (error) {
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_detail.log', `Error getting content detail: ${error.message}\n`);
+      fsSync.appendFileSync('/tmp/content_detail.log', `Error getting content detail: ${error.message}\n`);
       return {
         success: false,
         error: error.message,
@@ -847,31 +846,30 @@ class PlaywrightManager {
   async updateContent(nodeId, updates) {
     try {
       console.log('DEBUG: updateContent method STARTED with nodeId:', nodeId);
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_update.log', `updateContent called with nodeId: ${nodeId}\n`);
-      fs.appendFileSync('/tmp/content_update.log', `Updates: ${JSON.stringify(updates)}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `updateContent called with nodeId: ${nodeId}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Updates: ${JSON.stringify(updates)}\n`);
 
       if (!this.page) {
-        fs.appendFileSync('/tmp/content_update.log', 'No active page available\n');
+        fsSync.appendFileSync('/tmp/content_update.log', 'No active page available\n');
         throw new Error('No active page for content update');
       }
 
       // Get the base URL from environment
       const baseUrl = process.env.BASE_URL;
       if (!baseUrl) {
-        fs.appendFileSync('/tmp/content_update.log', 'BASE_URL not set\n');
+        fsSync.appendFileSync('/tmp/content_update.log', 'BASE_URL not set\n');
         throw new Error('BASE_URL environment variable is required for content update');
       }
 
       // Navigate to edit page
       const editUrl = `${baseUrl}/node/${nodeId}/edit`.replace(/\/$/, '');
-      fs.appendFileSync('/tmp/content_update.log', `Navigating to edit URL: ${editUrl}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Navigating to edit URL: ${editUrl}\n`);
 
       await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
       // Wait for the form to be fully loaded
       await this.page.waitForSelector('form', { timeout: 10000 });
-      fs.appendFileSync('/tmp/content_update.log', 'Edit form loaded\n');
+      fsSync.appendFileSync('/tmp/content_update.log', 'Edit form loaded\n');
 
       // Check if we successfully reached the edit page
       const currentUrl = this.page.url();
@@ -883,17 +881,17 @@ class PlaywrightManager {
 
       // Load schema for content type if available
       const contentType = await this.detectContentType();
-      fs.appendFileSync('/tmp/content_update.log', `Detected content type: ${contentType}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Detected content type: ${contentType}\n`);
 
       const schema = await this.loadSchemaForContentType(contentType);
-      fs.appendFileSync('/tmp/content_update.log', `Schema loaded: ${schema ? 'yes' : 'no'}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Schema loaded: ${schema ? 'yes' : 'no'}\n`);
 
       // Update fields based on schema or field names
       const updateResults = await this.updateFormFields(updates, schema);
-      fs.appendFileSync('/tmp/content_update.log', `Fields updated: ${JSON.stringify(updateResults)}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Fields updated: ${JSON.stringify(updateResults)}\n`);
 
       // Submit the form
-      fs.appendFileSync('/tmp/content_update.log', 'Submitting form...\n');
+      fsSync.appendFileSync('/tmp/content_update.log', 'Submitting form...\n');
 
       // Look for the Save button (Drupal typically uses "Save" as button text)
       const saveButton = this.page.locator('input[type="submit"][value*="Save"], button[type="submit"]:has-text("Save")').first();
@@ -910,7 +908,7 @@ class PlaywrightManager {
           console.log('Network idle timeout, checking for success indicators');
         }
 
-        fs.appendFileSync('/tmp/content_update.log', 'Form submitted successfully\n');
+        fsSync.appendFileSync('/tmp/content_update.log', 'Form submitted successfully\n');
 
         return {
           success: true,
@@ -925,8 +923,7 @@ class PlaywrightManager {
       }
 
     } catch (error) {
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_update.log', `Error updating content: ${error.message}\n`);
+      fsSync.appendFileSync('/tmp/content_update.log', `Error updating content: ${error.message}\n`);
       return {
         success: false,
         error: error.message,
