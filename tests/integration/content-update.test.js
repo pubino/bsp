@@ -10,7 +10,6 @@ describe('Content Update API Tests', () => {
     return;
   }
 
-  let server;
   let testApp;
 
   beforeAll(async () => {
