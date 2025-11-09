@@ -246,7 +246,7 @@ describe('Content Update API Tests', () => {
         .send('invalid json{');
 
       // Express should handle this with 400 Bad Request
-      expect([400, 500]).toContain(response.status);
+      expect(response.status).toBe(400);
     });
   });
 });

@@ -522,6 +522,9 @@ NOVNC_URL=http://localhost:8080/vnc.html
 
 # Application settings
 NODE_ENV=production
+
+# Debug logging (set to 'true' to enable detailed logging)
+# DEBUG_LOGGING=true
 ```
 
 ### Docker Services

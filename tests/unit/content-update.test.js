@@ -10,17 +10,22 @@ describe('PlaywrightManager - Content Update', () => {
   let mockLocator;
 
   beforeEach(() => {
-    // Create mock locator
-    mockLocator = {
-      count: jest.fn().mockResolvedValue(1),
-      fill: jest.fn().mockResolvedValue(undefined),
-      check: jest.fn().mockResolvedValue(undefined),
-      uncheck: jest.fn().mockResolvedValue(undefined),
-      selectOption: jest.fn().mockResolvedValue(undefined),
-      click: jest.fn().mockResolvedValue(undefined),
-      first: jest.fn().mockReturnThis(),
-      getAttribute: jest.fn().mockResolvedValue('text') // Default to text type
-    };
+    // Create mock locator factory for proper chaining
+    function createMockLocator() {
+      const locator = {
+        count: jest.fn().mockResolvedValue(1),
+        fill: jest.fn().mockResolvedValue(undefined),
+        check: jest.fn().mockResolvedValue(undefined),
+        uncheck: jest.fn().mockResolvedValue(undefined),
+        selectOption: jest.fn().mockResolvedValue(undefined),
+        click: jest.fn().mockResolvedValue(undefined),
+        getAttribute: jest.fn().mockResolvedValue('text'),
+        first: jest.fn()
+      };
+      locator.first.mockImplementation(() => createMockLocator());
+      return locator;
+    }
+    mockLocator = createMockLocator();
 
     // Create mock page
     mockPage = {
