@@ -1,6 +1,10 @@
 const { chromium } = require('playwright');
 const fs = require('fs').promises;
+const fsSync = require('fs'); // For synchronous operations like appendFileSync
 const path = require('path');
+
+// Debug flag - set DEBUG_LOGGING=true to enable detailed logging
+const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
 
 console.log('PlaywrightManager module loaded');
 
@@ -12,6 +16,29 @@ class PlaywrightManager {
     this.storageDir = path.join(process.cwd(), 'storage');
     this.storageStatePath = path.join(this.storageDir, 'storageState.json');
     this.display = process.env.DISPLAY || ':99';
+  }
+
+  // Debug logging helper
+  debugLog(message, ...args) {
+    if (DEBUG_LOGGING) {
+      console.log(`DEBUG: ${message}`, ...args);
+    }
+  }
+
+  // File debug logging helper
+  debugFileLog(logFile, message) {
+    if (DEBUG_LOGGING) {
+      fsSync.appendFileSync(logFile, message);
+    }
+  }
+
+  // URL construction helper - ensures no double slashes
+  buildUrl(baseUrl, ...pathSegments) {
+    // Remove trailing slash from baseUrl
+    const normalizedBase = baseUrl.replace(/\/$/, '');
+    // Join path segments and ensure they start with /
+    const path = pathSegments.map(seg => seg.replace(/^\/+/, '')).join('/');
+    return `${normalizedBase}/${path}`;
   }
 
   async ensureStorageDir() {
@@ -235,7 +262,7 @@ class PlaywrightManager {
       }
 
       // First try the admin structure page
-      const adminUrl = `${baseUrl}/admin/structure/types`.replace(/\/$/, ''); // Remove trailing slash if present
+      const adminUrl = this.buildUrl(baseUrl, 'admin/structure/types');
       console.log('Attempting to access content types via admin:', adminUrl);
       
       try {
@@ -295,7 +322,7 @@ class PlaywrightManager {
       }
       
       // Fallback: Try /node/add page
-      const nodeAddUrl = `${baseUrl}/node/add`.replace(/\/$/, '');
+      const nodeAddUrl = this.buildUrl(baseUrl, 'node/add');
       console.log('Attempting to access content types via node/add:', nodeAddUrl);
       
       await this.page.goto(nodeAddUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
@@ -366,7 +393,7 @@ class PlaywrightManager {
       }
 
       // Navigate to admin content page with pagination
-      let contentUrl = `${baseUrl}/admin/content`.replace(/\/$/, '');
+      let contentUrl = this.buildUrl(baseUrl, 'admin/content');
       if (page > 1) {
         contentUrl += `?page=${page - 1}`; // Drupal uses 0-based page indexing
       }
@@ -649,90 +676,88 @@ class PlaywrightManager {
    */
   async getContentDetail(nodeId) {
     try {
-      console.log('DEBUG: getContentDetail method STARTED with nodeId:', nodeId);
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_detail.log', `getContentDetail called with nodeId: ${nodeId}\n`);
+      this.debugLog('getContentDetail method STARTED with nodeId:', nodeId);
+      this.debugFileLog('/tmp/content_detail.log', `getContentDetail called with nodeId: ${nodeId}\n`);
 
       if (!this.page) {
-        fs.appendFileSync('/tmp/content_detail.log', 'No active page available\n');
+        this.debugFileLog('/tmp/content_detail.log', 'No active page available\n');
         throw new Error('No active page for content detail extraction');
       }
 
       // Get the base URL from environment
       const baseUrl = process.env.BASE_URL;
       if (!baseUrl) {
-        fs.appendFileSync('/tmp/content_detail.log', 'BASE_URL not set\n');
+        this.debugFileLog('/tmp/content_detail.log', 'BASE_URL not set\n');
         throw new Error('BASE_URL environment variable is required for content detail extraction');
       }
 
-      fs.appendFileSync('/tmp/content_detail.log', `BASE_URL: ${baseUrl}\n`);
-      fs.appendFileSync('/tmp/content_detail.log', `Current page URL before navigation: ${await this.page.url()}\n`);
+      this.debugFileLog('/tmp/content_detail.log', `BASE_URL: ${baseUrl}\n`);
+      this.debugFileLog('/tmp/content_detail.log', `Current page URL before navigation: ${await this.page.url()}\n`);
 
       // Always navigate to base URL first to ensure we're on the correct domain
-      fs.appendFileSync('/tmp/content_detail.log', `Navigating to base URL: ${baseUrl}\n`);
+      this.debugFileLog('/tmp/content_detail.log', `Navigating to base URL: ${baseUrl}\n`);
       await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      fs.appendFileSync('/tmp/content_detail.log', `After base URL navigation, current URL: ${await this.page.url()}\n`);
+      this.debugFileLog('/tmp/content_detail.log', `After base URL navigation, current URL: ${await this.page.url()}\n`);
 
       // Try edit interface first
-      const editUrl = `${baseUrl}/node/${nodeId}/edit`.replace(/\/$/, '');
-      fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via edit URL: ${editUrl}\n`);
+      const editUrl = this.buildUrl(baseUrl, `node/${nodeId}/edit`);
+      this.debugFileLog('/tmp/content_detail.log', `Attempting to access content via edit URL: ${editUrl}\n`);
 
       try {
-        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to edit URL...\n');
+        this.debugFileLog('/tmp/content_detail.log', 'Navigating to edit URL...\n');
         await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        fs.appendFileSync('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
+        this.debugFileLog('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we successfully reached the edit page
         const currentUrl = this.page.url();
         const isEditPage = currentUrl.includes(`/node/${nodeId}/edit`) || currentUrl.includes('edit');
 
         if (isEditPage) {
-          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
+          this.debugFileLog('/tmp/content_detail.log', 'Successfully accessed edit page, extracting content details\n');
 
           // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'edit');
-          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          this.debugFileLog('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
             success: true,
             content: contentData
           };
         } else {
-          fs.appendFileSync('/tmp/content_detail.log', `Edit page not accessible, current URL: ${currentUrl}\n`);
+          this.debugFileLog('/tmp/content_detail.log', `Edit page not accessible, current URL: ${currentUrl}\n`);
           throw new Error('Edit page not accessible');
         }
       } catch (editError) {
-        fs.appendFileSync('/tmp/content_detail.log', `Edit interface not accessible: ${editError.message}\n`);
+        this.debugFileLog('/tmp/content_detail.log', `Edit interface not accessible: ${editError.message}\n`);
 
         // Fallback to view interface
-        const viewUrl = `${baseUrl}/node/${nodeId}`.replace(/\/$/, '');
-        fs.appendFileSync('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
+        const viewUrl = this.buildUrl(baseUrl, `node/${nodeId}`);
+        this.debugFileLog('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
 
-        fs.appendFileSync('/tmp/content_detail.log', 'Navigating to view URL...\n');
+        this.debugFileLog('/tmp/content_detail.log', 'Navigating to view URL...\n');
         await this.page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        fs.appendFileSync('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
+        this.debugFileLog('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we reached the view page
         const currentUrl = this.page.url();
         const isViewPage = currentUrl.includes(`/node/${nodeId}`) && !currentUrl.includes('/edit');
 
         if (isViewPage) {
-          fs.appendFileSync('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
+          this.debugFileLog('/tmp/content_detail.log', 'Successfully accessed view page, extracting content details\n');
 
           // Extract content using DOM scraping
           const contentData = await this.extractContentFromPage(nodeId, 'view');
-          fs.appendFileSync('/tmp/content_detail.log', `Extraction complete, returning success\n`);
+          this.debugFileLog('/tmp/content_detail.log', `Extraction complete, returning success\n`);
           return {
             success: true,
             content: contentData
           };
         } else {
-          fs.appendFileSync('/tmp/content_detail.log', `View page not accessible either, current URL: ${currentUrl}\n`);
+          this.debugFileLog('/tmp/content_detail.log', `View page not accessible either, current URL: ${currentUrl}\n`);
           throw new Error('Could not access content via edit or view interfaces');
         }
       }
     } catch (error) {
-      const fs = require('fs');
-      fs.appendFileSync('/tmp/content_detail.log', `Error getting content detail: ${error.message}\n`);
+      this.debugFileLog('/tmp/content_detail.log', `Error getting content detail: ${error.message}\n`);
       return {
         success: false,
         error: error.message,
@@ -838,6 +863,251 @@ class PlaywrightManager {
 
   isReady() {
     return !!(this.browser && this.context && this.page);
+  }
+
+  /**
+   * Update content by node ID
+   * Navigates to edit page and updates fields based on provided data
+   */
+  async updateContent(nodeId, updates) {
+    try {
+      this.debugLog('updateContent method STARTED with nodeId:', nodeId);
+      this.debugFileLog('/tmp/content_update.log', `updateContent called with nodeId: ${nodeId}\n`);
+      this.debugFileLog('/tmp/content_update.log', `Updates: ${JSON.stringify(updates)}\n`);
+
+      if (!this.page) {
+        this.debugFileLog('/tmp/content_update.log', 'No active page available\n');
+        throw new Error('No active page for content update');
+      }
+
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        this.debugFileLog('/tmp/content_update.log', 'BASE_URL not set\n');
+        throw new Error('BASE_URL environment variable is required for content update');
+      }
+
+      // Navigate to edit page
+      const editUrl = this.buildUrl(baseUrl, `node/${nodeId}/edit`);
+      this.debugFileLog('/tmp/content_update.log', `Navigating to edit URL: ${editUrl}\n`);
+
+      await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      // Wait for the form to be fully loaded
+      await this.page.waitForSelector('form', { timeout: 10000 });
+      this.debugFileLog('/tmp/content_update.log', 'Edit form loaded\n');
+
+      // Check if we successfully reached the edit page
+      const currentUrl = this.page.url();
+      const isEditPage = currentUrl.includes(`/node/${nodeId}/edit`) || currentUrl.includes('edit');
+
+      if (!isEditPage) {
+        throw new Error(`Could not access edit page for node ${nodeId}. Current URL: ${currentUrl}`);
+      }
+
+      // Load schema for content type if available
+      const contentType = await this.detectContentType();
+      this.debugFileLog('/tmp/content_update.log', `Detected content type: ${contentType}\n`);
+
+      const schema = await this.loadSchemaForContentType(contentType);
+      this.debugFileLog('/tmp/content_update.log', `Schema loaded: ${schema ? 'yes' : 'no'}\n`);
+
+      // Update fields based on schema or field names
+      const updateResults = await this.updateFormFields(updates, schema);
+      this.debugFileLog('/tmp/content_update.log', `Fields updated: ${JSON.stringify(updateResults)}\n`);
+
+      // Submit the form
+      this.debugFileLog('/tmp/content_update.log', 'Submitting form...\n');
+
+      // Look for the Save button (Drupal typically uses "Save" as button text)
+      const saveButton = this.page.locator('input[type="submit"][value*="Save"], button[type="submit"]:has-text("Save")').first();
+
+      if (await saveButton.count() > 0) {
+        await saveButton.click();
+
+        // Wait for navigation or success message
+        // Drupal typically redirects to the view page after save
+        try {
+          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch (error) {
+          // If networkidle times out, that's okay - check for success message
+          this.debugLog('Network idle timeout, checking for success indicators');
+        }
+
+        this.debugFileLog('/tmp/content_update.log', 'Form submitted successfully\n');
+
+        return {
+          success: true,
+          nodeId: nodeId,
+          message: `Content ${nodeId} updated successfully`,
+          updatedFields: updateResults.updated,
+          skippedFields: updateResults.skipped,
+          redirectUrl: this.page.url()
+        };
+      } else {
+        throw new Error('Could not find Save button on edit form');
+      }
+
+    } catch (error) {
+      this.debugFileLog('/tmp/content_update.log', `Error updating content: ${error.message}\n`);
+      return {
+        success: false,
+        error: error.message,
+        nodeId: nodeId
+      };
+    }
+  }
+
+  /**
+   * Detect content type from edit page
+   */
+  async detectContentType() {
+    try {
+      // Try to get content type from form data-drupal-selector or URL
+      const contentType = await this.page.evaluate(() => {
+        // Check form class or data attributes
+        const form = document.querySelector('form[data-drupal-selector*="node-"]');
+        if (form) {
+          const selector = form.getAttribute('data-drupal-selector') || '';
+          const match = selector.match(/node-([a-z0-9_]+)-/);
+          if (match) return match[1];
+        }
+
+        // Check for content type in form action or other attributes
+        const formAction = document.querySelector('form')?.action || '';
+        const urlMatch = formAction.match(/\/node\/add\/([a-z0-9_]+)/);
+        if (urlMatch) return urlMatch[1];
+
+        return null;
+      });
+
+      return contentType || 'unknown';
+    } catch (error) {
+      console.error('Error detecting content type:', error);
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Load schema for a content type
+   */
+  async loadSchemaForContentType(contentType) {
+    try {
+      const schemaPath = path.join(process.cwd(), 'schemas', `${contentType}.json`);
+      const schemaContent = await fs.readFile(schemaPath, 'utf8');
+      return JSON.parse(schemaContent);
+    } catch (error) {
+      console.log(`No schema found for content type: ${contentType}`);
+      return null;
+    }
+  }
+
+  /**
+   * Update form fields based on provided updates and optional schema
+   */
+  async updateFormFields(updates, schema) {
+    const updated = [];
+    const skipped = [];
+
+    for (const [fieldName, fieldValue] of Object.entries(updates)) {
+      try {
+        let selector = null;
+        let fieldType = 'text';
+
+        // If schema is available, use it to get the selector and type
+        if (schema && schema.fields && schema.fields[fieldName]) {
+          selector = schema.fields[fieldName].selector;
+          fieldType = schema.fields[fieldName].type || 'text';
+        } else {
+          // Try to guess the selector based on common Drupal patterns
+          selector = `[name="${fieldName}[0][value]"]`;
+        }
+
+        console.log(`Attempting to update field: ${fieldName} with selector: ${selector}`);
+
+        // Check if field exists
+        const fieldExists = await this.page.locator(selector).count() > 0;
+
+        if (!fieldExists) {
+          // Try alternative selectors
+          const altSelectors = [
+            `[name="${fieldName}"]`,
+            `[name="${fieldName}[value]"]`,
+            `[id*="${fieldName}"]`,
+            `[name*="${fieldName}"]`
+          ];
+
+          let found = false;
+          for (const altSelector of altSelectors) {
+            if (await this.page.locator(altSelector).count() > 0) {
+              selector = altSelector;
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) {
+            skipped.push({ field: fieldName, reason: 'Field not found' });
+            continue;
+          }
+        }
+
+        // Detect if the field is actually a checkbox by checking the element
+        const element = this.page.locator(selector).first();
+        const elementType = await element.getAttribute('type').catch(() => null);
+
+        // Override fieldType if we detect it's actually a checkbox
+        if (elementType === 'checkbox') {
+          fieldType = 'checkbox';
+        }
+
+        // Update field based on type
+        switch (fieldType) {
+          case 'text':
+          case 'textarea':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          case 'checkbox':
+            // Convert various truthy/falsy values
+            const shouldCheck = fieldValue === true ||
+                               fieldValue === '1' ||
+                               fieldValue === 1 ||
+                               String(fieldValue).toLowerCase() === 'true';
+
+            if (shouldCheck) {
+              await this.page.locator(selector).check();
+            } else {
+              await this.page.locator(selector).uncheck();
+            }
+            break;
+
+          case 'select':
+            await this.page.locator(selector).selectOption(String(fieldValue));
+            break;
+
+          case 'date':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          case 'time':
+            await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          default:
+            await this.page.locator(selector).fill(String(fieldValue));
+        }
+
+        updated.push({ field: fieldName, value: fieldValue });
+        console.log(`Successfully updated field: ${fieldName}`);
+
+      } catch (error) {
+        console.error(`Error updating field ${fieldName}:`, error.message);
+        skipped.push({ field: fieldName, reason: error.message });
+      }
+    }
+
+    return { updated, skipped };
   }
 }
 

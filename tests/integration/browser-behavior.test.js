@@ -16,7 +16,6 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
     return;
   }
 
-  let server;
   let testApp;
 
   beforeAll(async () => {

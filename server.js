@@ -4,6 +4,17 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const PlaywrightManager = require('./src/playwrightManager');
 
+// Debug flag for server logging
+const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
+const fsSync = require('fs'); // For synchronous debug logging
+
+// Debug logging helper
+function debugLog(message) {
+  if (DEBUG_LOGGING) {
+    fsSync.appendFileSync('/tmp/debug.log', `${message}\n`);
+  }
+}
+
 console.log('Server.js starting...');
 
 const app = express();
@@ -305,6 +316,59 @@ app.get('/content/detail/:nodeId', async (req, res) => {
     res.json(result);
   } catch (error) {
     fs.appendFileSync('/tmp/debug.log', `Content detail error: ${error.message}\n`);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Update content by node ID
+app.put('/content/:nodeId', async (req, res) => {
+  debugLog(`PUT /content/:nodeId route hit with params: ${JSON.stringify(req.params)}`);
+  debugLog(`Request body: ${JSON.stringify(req.body)}`);
+
+  try {
+    if (!playwrightManager.isReady()) {
+      debugLog('Manager not ready');
+      return res.status(400).json({
+        success: false,
+        error: 'No active browser session. Call /login/interactive first.'
+      });
+    }
+
+    debugLog('Parsing nodeId');
+    const nodeId = parseInt(req.params.nodeId);
+    debugLog(`Parsed nodeId: ${nodeId}`);
+
+    if (isNaN(nodeId) || nodeId < 1) {
+      debugLog('Invalid nodeId');
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid node ID. Must be a positive integer.'
+      });
+    }
+
+    // Validate that updates object is provided
+    if (!req.body || typeof req.body !== 'object' || Object.keys(req.body).length === 0) {
+      debugLog('No updates provided');
+      return res.status(400).json({
+        success: false,
+        error: 'No updates provided. Request body must contain field updates as key-value pairs.'
+      });
+    }
+
+    debugLog('Calling updateContent');
+    const result = await playwrightManager.updateContent(nodeId, req.body);
+    debugLog(`updateContent returned: ${JSON.stringify(result)}`);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    debugLog(`Content update error: ${error.message}`);
     res.status(500).json({
       success: false,
       error: error.message
