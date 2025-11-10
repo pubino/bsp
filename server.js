@@ -255,43 +255,61 @@ app.get('/session/keepalive/status', async (req, res) => {
 });
 
 // Keepalive endpoint - refreshes session by making a simple request
+// Rate-limited to prevent abuse
 app.post('/session/keepalive', async (req, res) => {
   try {
     if (!playwrightManager.isReady()) {
       return res.status(400).json({
         success: false,
-        error: 'No active browser session'
+        error: 'Browser not ready. No active browser session.'
       });
     }
 
-    const baseUrl = process.env.BASE_URL;
-    if (!baseUrl) {
+    // Rate limiting check (prevent refreshes more than once per minute)
+    const now = Date.now();
+    const lastRefresh = playwrightManager.keepaliveLastRefresh || 0;
+    const timeSinceLastRefresh = now - lastRefresh;
+    const minInterval = 60 * 1000; // 1 minute in milliseconds
+
+    if (timeSinceLastRefresh < minInterval) {
+      const secondsRemaining = Math.ceil((minInterval - timeSinceLastRefresh) / 1000);
+      return res.status(429).json({
+        success: false,
+        error: `Rate limit exceeded. Please wait ${secondsRemaining} seconds before refreshing again.`,
+        rateLimitInfo: {
+          minIntervalSeconds: 60,
+          secondsRemaining: secondsRemaining,
+          lastRefreshTime: new Date(lastRefresh).toISOString()
+        }
+      });
+    }
+
+    // Use the shared performKeepaliveRefresh method
+    const success = await playwrightManager.performKeepaliveRefresh();
+
+    if (!success) {
       return res.status(500).json({
         success: false,
-        error: 'BASE_URL not configured'
+        error: 'Keepalive refresh failed. Check server logs for details.',
+        circuitBreaker: playwrightManager.getKeepaliveStatus().circuitBreaker
       });
     }
 
-    // Navigate to a lightweight page to refresh the session
-    const currentUrl = playwrightManager.page.url();
-    await playwrightManager.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
-
-    // Get updated cookie info
+    // Get updated session info
     const cookies = await playwrightManager.context.cookies();
     const sessionCookie = cookies.find(c => c.name.includes('SESS') || c.name.includes('SSESS'));
 
-    const now = Date.now() / 1000;
+    const nowSeconds = Date.now() / 1000;
     const expiryInfo = sessionCookie && sessionCookie.expires > 0 ? {
       expiresDate: new Date(sessionCookie.expires * 1000).toISOString(),
-      hoursUntilExpiry: Math.round((sessionCookie.expires - now) / 3600)
+      hoursUntilExpiry: Math.round((sessionCookie.expires - nowSeconds) / 3600)
     } : null;
 
     res.json({
       success: true,
       message: 'Session refreshed',
-      previousUrl: currentUrl,
-      currentUrl: playwrightManager.page.url(),
-      sessionExpiry: expiryInfo
+      sessionExpiry: expiryInfo,
+      circuitBreaker: playwrightManager.getKeepaliveStatus().circuitBreaker
     });
   } catch (error) {
     console.error('Keepalive error:', error);

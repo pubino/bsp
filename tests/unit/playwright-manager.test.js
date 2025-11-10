@@ -181,6 +181,48 @@ describe('PlaywrightManager Unit Tests', () => {
       expect(mgr.keepaliveIntervalMinutes).toBe(60);
     });
 
+    test('should constrain interval to minimum (5 minutes)', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '1';
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(5);
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('out of range'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('5 minutes'));
+      consoleSpy.mockRestore();
+    });
+
+    test('should constrain interval to maximum (1440 minutes)', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '10000';
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(1440);
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('out of range'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('1440 minutes'));
+      consoleSpy.mockRestore();
+    });
+
+    test('should accept valid interval within range', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '30';
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(30);
+      expect(consoleSpy).not.toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+
+    test('should use explicit radix for parseInt', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '30';
+      process.env.KEEPALIVE_MAX_FAILURES = '5';
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(30);
+      expect(mgr.keepaliveMaxFailures).toBe(5);
+    });
+
+    test('should initialize keepaliveLastRefresh to null', () => {
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveLastRefresh).toBeNull();
+    });
+
     test('getKeepaliveStatus should return correct status when not running', () => {
       const status = manager.getKeepaliveStatus();
       expect(status.enabled).toBe(true);
