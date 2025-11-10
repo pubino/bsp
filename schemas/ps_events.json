@@ -1,6 +1,6 @@
 {
   "contentType": "ps_events",
-  "description": "Schema for Princeton Events content type",
+  "description": "Schema for Events content type",
   "fields": {
     "title": {
       "selector": "[name=\"title[0][value]\"]",

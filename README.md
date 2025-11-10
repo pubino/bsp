@@ -134,6 +134,52 @@ Before creating content, the API queries available content types and validates t
 
 The API loads the schema for the specified content type and validates that all required fields are provided. If any required fields are missing, the request will fail with a descriptive error message.
 
+**Content Type Schemas:**
+
+Schemas define the fields, selectors, types, and requirements for each content type. They are stored in the `schemas/` directory as JSON files named by content type machine name (e.g., `schemas/article.json`, `schemas/event.json`).
+
+**Schema Behavior:**
+- **If schema exists**: The API validates required fields before submission and uses exact field selectors
+- **If schema is missing**: The API uses best-effort field matching based on field names and IDs
+- Schemas are optional but recommended for reliable field validation and accurate field targeting
+
+**Schema Structure:**
+```json
+{
+  "contentType": "article",
+  "description": "Schema for Article content type",
+  "fields": {
+    "title": {
+      "selector": "[name=\"title[0][value]\"]",
+      "type": "text",
+      "required": true,
+      "label": "Title"
+    },
+    "body": {
+      "selector": "[name=\"body[0][value]\"]",
+      "type": "textarea",
+      "required": false,
+      "label": "Body"
+    }
+  }
+}
+```
+
+**Creating Custom Schemas:**
+
+1. Query your content type's creation form to identify field names
+2. Create a JSON file in `schemas/` named `{contentType}.json`
+3. Define each field with its selector, type, and whether it's required
+4. The API will automatically load and use the schema for validation
+
+**Supported Field Types:**
+- `text` - Single-line text input
+- `textarea` - Multi-line text area
+- `date` - Date input (YYYY-MM-DD format)
+- `time` - Time input (HH:MM format)
+- `checkbox` - Boolean checkbox
+- `select` - Dropdown selection
+
 **Examples:**
 
 **Create an Article:**
