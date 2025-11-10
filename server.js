@@ -197,9 +197,14 @@ app.post('/login/load', async (req, res) => {
   try {
     await playwrightManager.close(); // Close any existing session
     const { context, page } = await playwrightManager.loadAuthenticatedContext();
+
+    // Start internal keepalive after loading session
+    playwrightManager.startKeepalive();
+
     res.json({
       success: true,
-      message: 'Authentication state loaded'
+      message: 'Authentication state loaded',
+      keepalive: playwrightManager.getKeepaliveStatus()
     });
   } catch (error) {
     console.error('Load auth state error:', error);
@@ -233,6 +238,88 @@ app.get('/debug/screenshot', async (req, res) => {
   }
 });
 
+// Get keepalive status
+app.get('/session/keepalive/status', async (req, res) => {
+  try {
+    const status = playwrightManager.getKeepaliveStatus();
+    res.json({
+      success: true,
+      ...status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Keepalive endpoint - refreshes session by making a simple request
+// Rate-limited to prevent abuse
+app.post('/session/keepalive', async (req, res) => {
+  try {
+    if (!playwrightManager.isReady()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Browser not ready. No active browser session.'
+      });
+    }
+
+    // Rate limiting check (prevent refreshes more than once per minute)
+    const now = Date.now();
+    const lastRefresh = playwrightManager.keepaliveLastRefresh || 0;
+    const timeSinceLastRefresh = now - lastRefresh;
+    const minInterval = 60 * 1000; // 1 minute in milliseconds
+
+    if (timeSinceLastRefresh < minInterval) {
+      const secondsRemaining = Math.ceil((minInterval - timeSinceLastRefresh) / 1000);
+      return res.status(429).json({
+        success: false,
+        error: `Rate limit exceeded. Please wait ${secondsRemaining} seconds before refreshing again.`,
+        rateLimitInfo: {
+          minIntervalSeconds: 60,
+          secondsRemaining: secondsRemaining,
+          lastRefreshTime: new Date(lastRefresh).toISOString()
+        }
+      });
+    }
+
+    // Use the shared performKeepaliveRefresh method
+    const success = await playwrightManager.performKeepaliveRefresh();
+
+    if (!success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Keepalive refresh failed. Check server logs for details.',
+        circuitBreaker: playwrightManager.getKeepaliveStatus().circuitBreaker
+      });
+    }
+
+    // Get updated session info
+    const cookies = await playwrightManager.context.cookies();
+    const sessionCookie = cookies.find(c => c.name.includes('SESS') || c.name.includes('SSESS'));
+
+    const nowSeconds = Date.now() / 1000;
+    const expiryInfo = sessionCookie && sessionCookie.expires > 0 ? {
+      expiresDate: new Date(sessionCookie.expires * 1000).toISOString(),
+      hoursUntilExpiry: Math.round((sessionCookie.expires - nowSeconds) / 3600)
+    } : null;
+
+    res.json({
+      success: true,
+      message: 'Session refreshed',
+      sessionExpiry: expiryInfo,
+      circuitBreaker: playwrightManager.getKeepaliveStatus().circuitBreaker
+    });
+  } catch (error) {
+    console.error('Keepalive error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Debug page info
 app.get('/debug/page', async (req, res) => {
   try {
@@ -244,7 +331,7 @@ app.get('/debug/page', async (req, res) => {
 
     // Wait a moment to ensure navigation is complete
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     const url = playwrightManager.page.url();
     const title = await playwrightManager.page.title();
     const isVisible = await playwrightManager.page.isVisible('body');

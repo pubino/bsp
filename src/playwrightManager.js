@@ -32,6 +32,20 @@ class PlaywrightManager {
     this.storageDir = path.join(process.cwd(), 'storage');
     this.storageStatePath = path.join(this.storageDir, 'storageState.json');
     this.display = process.env.DISPLAY || ':99';
+    this.keepaliveInterval = null;
+    this.keepaliveEnabled = process.env.KEEPALIVE_ENABLED !== 'false'; // Default: enabled
+
+    // Validate and constrain keepalive interval (min: 5 minutes, max: 1440 minutes/24 hours)
+    const intervalMinutes = parseInt(process.env.KEEPALIVE_INTERVAL_MINUTES, 10) || 60;
+    this.keepaliveIntervalMinutes = Math.max(5, Math.min(1440, intervalMinutes));
+    if (intervalMinutes !== this.keepaliveIntervalMinutes) {
+      console.warn(`KEEPALIVE_INTERVAL_MINUTES=${intervalMinutes} out of range. Constrained to ${this.keepaliveIntervalMinutes} minutes (valid range: 5-1440)`);
+    }
+
+    this.keepaliveConsecutiveFailures = 0;
+    this.keepaliveMaxFailures = parseInt(process.env.KEEPALIVE_MAX_FAILURES, 10) || 3; // Circuit breaker threshold
+    this.keepaliveCircuitOpen = false;
+    this.keepaliveLastRefresh = null; // Track last successful refresh
   }
 
   // Debug logging helper
@@ -650,9 +664,171 @@ class PlaywrightManager {
     }
   }
 
+  /**
+   * Perform a single keepalive refresh
+   * Internal method used by both automatic and manual keepalive
+   */
+  async performKeepaliveRefresh() {
+    // Check circuit breaker
+    if (this.keepaliveCircuitOpen) {
+      console.warn(`Keepalive: Circuit breaker OPEN (${this.keepaliveConsecutiveFailures} consecutive failures). Skipping refresh.`);
+      return false;
+    }
+
+    try {
+      if (!this.isReady()) {
+        console.log('Keepalive: Browser not ready, skipping');
+        return false;
+      }
+
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        console.log('Keepalive: BASE_URL not set, skipping');
+        return false;
+      }
+
+      console.log(`Keepalive: Refreshing session by navigating to ${baseUrl}`);
+      const currentUrl = this.page.url();
+
+      // Attempt navigation with retry logic
+      let retries = 3;
+      let lastError = null;
+      let success = false;
+
+      while (retries > 0 && !success) {
+        try {
+          await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+          success = true;
+        } catch (error) {
+          lastError = error;
+          retries--;
+          if (retries > 0) {
+            console.warn(`Keepalive: Navigation failed, retrying (${retries} attempts remaining)...`);
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+          }
+        }
+      }
+
+      if (!success) {
+        throw lastError;
+      }
+
+      // Get session cookie info
+      const cookies = await this.context.cookies();
+      const sessionCookie = cookies.find(c => c.name.includes('SESS') || c.name.includes('SSESS'));
+
+      if (sessionCookie && sessionCookie.expires > 0) {
+        const now = Date.now() / 1000;
+        const hoursUntilExpiry = Math.round((sessionCookie.expires - now) / 3600);
+        console.log(`Keepalive: Session refreshed successfully. Expires in ${hoursUntilExpiry} hours`);
+      } else {
+        console.log('Keepalive: Session refreshed (session cookie or no expiry)');
+      }
+
+      // Navigate back if we were somewhere else
+      if (currentUrl !== baseUrl) {
+        try {
+          await this.page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+        } catch (error) {
+          console.warn(`Keepalive: Could not navigate back to ${currentUrl}: ${error.message}`);
+        }
+      }
+
+      // Success - reset failure counter and update last refresh time
+      if (this.keepaliveConsecutiveFailures > 0) {
+        console.log(`Keepalive: Recovery successful. Resetting failure counter from ${this.keepaliveConsecutiveFailures} to 0`);
+        this.keepaliveConsecutiveFailures = 0;
+      }
+      this.keepaliveLastRefresh = Date.now();
+
+      return true;
+
+    } catch (error) {
+      this.keepaliveConsecutiveFailures++;
+      console.error(`Keepalive error (failure ${this.keepaliveConsecutiveFailures}/${this.keepaliveMaxFailures}): ${error.message}`);
+
+      // Open circuit breaker if max failures reached
+      if (this.keepaliveConsecutiveFailures >= this.keepaliveMaxFailures) {
+        this.keepaliveCircuitOpen = true;
+        console.error(`Keepalive: Circuit breaker OPENED after ${this.keepaliveConsecutiveFailures} consecutive failures. Keepalive is now disabled.`);
+        console.error('Keepalive: To recover, restart keepalive manually or reload the session.');
+      }
+
+      return false;
+    }
+  }
+
+  /**
+   * Start internal keepalive mechanism
+   * Automatically refreshes session at configured intervals with retry logic and circuit breaker
+   */
+  startKeepalive() {
+    if (!this.keepaliveEnabled) {
+      console.log('Keepalive disabled via KEEPALIVE_ENABLED=false');
+      return;
+    }
+
+    // Stop existing keepalive first to prevent duplicates
+    this.stopKeepalive();
+
+    // Reset circuit breaker state
+    this.keepaliveConsecutiveFailures = 0;
+    this.keepaliveCircuitOpen = false;
+
+    const intervalMs = this.keepaliveIntervalMinutes * 60 * 1000;
+    console.log(`Starting internal keepalive: will refresh session every ${this.keepaliveIntervalMinutes} minutes`);
+    console.log(`Keepalive circuit breaker: max failures = ${this.keepaliveMaxFailures}`);
+
+    // Perform immediate first refresh
+    console.log('Keepalive: Performing immediate first refresh...');
+    this.performKeepaliveRefresh().catch(error => {
+      console.error('Keepalive: Immediate refresh failed:', error.message);
+    });
+
+    // Set up periodic refresh
+    this.keepaliveInterval = setInterval(async () => {
+      await this.performKeepaliveRefresh();
+    }, intervalMs);
+
+    console.log('Internal keepalive started');
+  }
+
+  /**
+   * Stop internal keepalive mechanism
+   */
+  stopKeepalive() {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+      console.log('Internal keepalive stopped');
+    }
+  }
+
+  /**
+   * Get keepalive status including circuit breaker state
+   */
+  getKeepaliveStatus() {
+    return {
+      enabled: this.keepaliveEnabled,
+      running: this.keepaliveInterval !== null,
+      intervalMinutes: this.keepaliveIntervalMinutes,
+      circuitBreaker: {
+        open: this.keepaliveCircuitOpen,
+        consecutiveFailures: this.keepaliveConsecutiveFailures,
+        maxFailures: this.keepaliveMaxFailures
+      }
+    };
+  }
+
   async close() {
     console.log('Closing PlaywrightManager resources...');
-    
+
+    // Stop keepalive before closing
+    this.stopKeepalive();
+
+    // Reset keepalive timestamp to allow immediate refresh after reopen
+    this.keepaliveLastRefresh = null;
+
     try {
       if (this.page) {
         await this.page.close();

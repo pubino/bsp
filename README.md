@@ -593,6 +593,91 @@ curl -X POST http://localhost:3000/login/load
 
 **Note:** Session files contain authentication cookies and may become stale. Re-authenticate if operations fail.
 
+### Session Keepalive
+
+**Automatic Keepalive (Internal):**
+
+The system includes an internal keepalive mechanism that automatically refreshes your session to prevent expiration. This is especially important for CAS/Shibboleth authentication where session cookies are session-based.
+
+**Features:**
+- **Enabled by default** - Runs automatically when session is loaded
+- **Immediate first refresh** - Performs initial refresh immediately on start
+- **Configurable interval**: 5-1440 minutes (5 minutes to 24 hours), default 60 minutes
+- **Retry logic**: Automatically retries navigation failures up to 3 times with 2-second delays
+- **Circuit breaker**: Disables keepalive after 3 consecutive failures to prevent resource waste
+- **Auto-recovery**: Resets failure counter on successful refresh
+- **Input validation**: Interval automatically constrained to valid range (5-1440 minutes)
+
+**Configuration:**
+```bash
+KEEPALIVE_ENABLED=true          # Enable/disable (default: true)
+KEEPALIVE_INTERVAL_MINUTES=60   # Interval in minutes (default: 60, range: 5-1440)
+KEEPALIVE_MAX_FAILURES=3        # Circuit breaker threshold (default: 3)
+```
+
+**Important Notes:**
+- Minimum interval: 5 minutes (prevents server overload)
+- Maximum interval: 1440 minutes/24 hours (prevents sessions from never refreshing)
+- Invalid intervals are automatically constrained and logged as warnings
+
+**Check keepalive status:**
+```bash
+curl http://localhost:3000/session/keepalive/status
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "enabled": true,
+  "running": true,
+  "intervalMinutes": 60,
+  "circuitBreaker": {
+    "open": false,
+    "consecutiveFailures": 0,
+    "maxFailures": 3
+  }
+}
+```
+
+**Manual Keepalive (External):**
+
+You can also manually refresh the session as an additional safety layer. The endpoint is **rate-limited to once per minute** to prevent abuse.
+
+```bash
+curl -X POST http://localhost:3000/session/keepalive
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Session refreshed",
+  "sessionExpiry": {
+    "expiresDate": "2026-12-14T21:41:49.162Z",
+    "hoursUntilExpiry": 9595
+  },
+  "circuitBreaker": {
+    "open": false,
+    "consecutiveFailures": 0,
+    "maxFailures": 3
+  }
+}
+```
+
+**Rate Limit Response (429 Too Many Requests):**
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded. Please wait 45 seconds before refreshing again.",
+  "rateLimitInfo": {
+    "minIntervalSeconds": 60,
+    "secondsRemaining": 45,
+    "lastRefreshTime": "2025-11-10T03:15:30.123Z"
+  }
+}
+```
+
 ### Authentication Status
 
 **Check authentication:**

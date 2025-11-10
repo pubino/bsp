@@ -188,7 +188,10 @@ describe('Browser Auto-Launch and Navigation Tests', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.instructions).toContain('about:blank');
       expect(response.body.instructions).toContain('Manually navigate');
-      expect(response.body.instructions).toContain('https://example.com/login');
+
+      // Should contain the configured login URL (from DEFAULT_LOGIN_URL env var)
+      const expectedUrl = process.env.DEFAULT_LOGIN_URL || 'https://example.com/login';
+      expect(response.body.instructions).toContain(expectedUrl);
     });
   });
 
