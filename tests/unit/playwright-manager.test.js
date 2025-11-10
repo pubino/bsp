@@ -316,12 +316,20 @@ describe('PlaywrightManager Unit Tests', () => {
     });
 
     test('close should stop keepalive', async () => {
+      // Use real timers for this test since createInteractiveContext uses setTimeout
+      jest.useRealTimers();
+
       await manager.createInteractiveContext();
+
+      // Switch back to fake timers after browser launch completes
+      jest.useFakeTimers();
       manager.keepaliveInterval = setInterval(() => {}, 1000);
 
       await manager.close();
 
       expect(manager.keepaliveInterval).toBeNull();
+
+      // Clean up - afterEach will restore real timers
     });
 
     test('should initialize circuit breaker state correctly', () => {
