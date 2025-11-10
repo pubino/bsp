@@ -959,6 +959,198 @@ class PlaywrightManager {
   }
 
   /**
+   * Create new content by content type
+   * Navigates to content creation page, fills form fields, and submits
+   *
+   * @param {string} contentType - Machine name of content type (e.g., 'article', 'page')
+   * @param {Object} fields - Field values as key-value pairs
+   * @returns {Object} Result with success status, node ID if created, and field information
+   */
+  async createContent(contentType, fields) {
+    try {
+      this.debugLog('createContent method STARTED with contentType:', contentType);
+      this.debugFileLog('/tmp/content_create.log', `createContent called with contentType: ${contentType}\n`);
+      this.debugFileLog('/tmp/content_create.log', `Fields: ${JSON.stringify(fields)}\n`);
+
+      if (!this.page) {
+        this.debugFileLog('/tmp/content_create.log', 'No active page available\n');
+        throw new Error('No active page for content creation');
+      }
+
+      // Get the base URL from environment
+      const baseUrl = process.env.BASE_URL;
+      if (!baseUrl) {
+        this.debugFileLog('/tmp/content_create.log', 'BASE_URL not set\n');
+        throw new Error('BASE_URL environment variable is required for content creation');
+      }
+
+      // Validate content type is provided
+      if (!contentType || typeof contentType !== 'string') {
+        throw new Error('Content type must be provided as a string (e.g., "article", "page")');
+      }
+
+      // Validate that fields object is provided
+      if (!fields || typeof fields !== 'object' || Object.keys(fields).length === 0) {
+        this.debugFileLog('/tmp/content_create.log', 'No fields provided\n');
+        throw new Error('No fields provided. Request body must contain field values as key-value pairs.');
+      }
+
+      // First, verify the content type exists
+      this.debugFileLog('/tmp/content_create.log', 'Verifying content type exists...\n');
+      const contentTypesResult = await this.queryContentTypes();
+
+      if (!contentTypesResult.success) {
+        throw new Error(`Failed to query available content types: ${contentTypesResult.error}`);
+      }
+
+      const availableType = contentTypesResult.contentTypes.find(
+        ct => ct.machineName === contentType
+      );
+
+      if (!availableType) {
+        const availableTypes = contentTypesResult.contentTypes.map(ct => ct.machineName).join(', ');
+        throw new Error(
+          `Content type "${contentType}" not found. Available types: ${availableTypes}`
+        );
+      }
+
+      this.debugFileLog('/tmp/content_create.log', `Content type "${contentType}" verified\n`);
+
+      // Navigate to content creation page
+      const createUrl = this.buildUrl(baseUrl, `node/add/${contentType}`);
+      this.debugFileLog('/tmp/content_create.log', `Navigating to create URL: ${createUrl}\n`);
+
+      await this.page.goto(createUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      // Wait for the form to be fully loaded
+      await this.page.waitForSelector('form', { timeout: 10000 });
+      this.debugFileLog('/tmp/content_create.log', 'Create form loaded\n');
+
+      // Check if we successfully reached the create page
+      const currentUrl = this.page.url();
+      const isCreatePage = currentUrl.includes(`/node/add/${contentType}`) || currentUrl.includes('/node/add');
+
+      if (!isCreatePage) {
+        throw new Error(`Could not access create page for content type "${contentType}". Current URL: ${currentUrl}`);
+      }
+
+      // Load schema for content type if available
+      const schema = await this.loadSchemaForContentType(contentType);
+      this.debugFileLog('/tmp/content_create.log', `Schema loaded: ${schema ? 'yes' : 'no'}\n`);
+
+      // Check for required fields in schema
+      if (schema && schema.fields) {
+        const requiredFields = Object.entries(schema.fields)
+          .filter(([_, fieldDef]) => fieldDef.required)
+          .map(([fieldName, _]) => fieldName);
+
+        const missingRequired = requiredFields.filter(reqField => !fields.hasOwnProperty(reqField));
+
+        if (missingRequired.length > 0) {
+          throw new Error(
+            `Missing required fields: ${missingRequired.join(', ')}. Required fields for ${contentType}: ${requiredFields.join(', ')}`
+          );
+        }
+      }
+
+      // Fill in fields - only touch fields that are explicitly provided
+      const updateResults = await this.updateFormFields(fields, schema);
+      this.debugFileLog('/tmp/content_create.log', `Fields filled: ${JSON.stringify(updateResults)}\n`);
+
+      // Submit the form
+      this.debugFileLog('/tmp/content_create.log', 'Submitting form...\n');
+
+      // Look for the Save button
+      const saveButton = this.page.locator('input[type="submit"][value*="Save"], button[type="submit"]:has-text("Save")').first();
+
+      if (await saveButton.count() > 0) {
+        await saveButton.click();
+
+        // Wait for navigation - Drupal redirects to the view page after creation
+        try {
+          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+        } catch (error) {
+          this.debugLog('Network idle timeout, checking for success indicators');
+        }
+
+        this.debugFileLog('/tmp/content_create.log', 'Form submitted successfully\n');
+
+        // Extract the new node ID from the redirect URL
+        const redirectUrl = this.page.url();
+        let nodeIdMatch = redirectUrl.match(/\/node\/(\d+)/);
+        let nodeId = nodeIdMatch ? parseInt(nodeIdMatch[1]) : null;
+
+        // If no node ID found in URL (e.g., using path aliases), try to extract from edit link
+        if (!nodeId) {
+          this.debugLog('No node ID in redirect URL, attempting to find edit link');
+          try {
+            // Wait a moment for the page to fully load
+            await this.page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+
+            // Try multiple selectors for edit links
+            const editSelectors = [
+              'a[href*="/node/"][href*="/edit"]',
+              'a:has-text("Edit")',
+              'ul.tabs a[href*="/edit"]',
+              'nav a[href*="/edit"]',
+              '.tabs__link[href*="/edit"]'
+            ];
+
+            for (const selector of editSelectors) {
+              try {
+                const editLink = this.page.locator(selector).first();
+                const count = await editLink.count();
+
+                if (count > 0) {
+                  const editHref = await editLink.getAttribute('href');
+                  this.debugLog(`Found edit link with selector "${selector}": ${editHref}`);
+
+                  if (editHref) {
+                    // Extract node ID from edit link (e.g., /node/123/edit)
+                    const editNodeIdMatch = editHref.match(/\/node\/(\d+)/);
+                    if (editNodeIdMatch) {
+                      nodeId = parseInt(editNodeIdMatch[1]);
+                      this.debugLog(`Extracted node ID ${nodeId} from edit link`);
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                // Try next selector
+                continue;
+              }
+            }
+          } catch (error) {
+            this.debugLog(`Error finding edit link: ${error.message}`);
+          }
+        }
+
+        return {
+          success: true,
+          nodeId: nodeId,
+          contentType: contentType,
+          message: nodeId
+            ? `Content created successfully with node ID ${nodeId}`
+            : 'Content created successfully',
+          filledFields: updateResults.updated,
+          skippedFields: updateResults.skipped,
+          redirectUrl: redirectUrl
+        };
+      } else {
+        throw new Error('Could not find Save button on create form');
+      }
+
+    } catch (error) {
+      this.debugFileLog('/tmp/content_create.log', `Error creating content: ${error.message}\n`);
+      return {
+        success: false,
+        error: error.message,
+        contentType: contentType
+      };
+    }
+  }
+
+  /**
    * Detect content type from edit page
    */
   async detectContentType() {

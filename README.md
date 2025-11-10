@@ -55,6 +55,11 @@ curl "http://localhost:3000/content?limit=10"
 # Get content details
 curl "http://localhost:3000/content/detail/123"
 
+# Create new content
+curl -X POST -H "Content-Type: application/json" \
+  http://localhost:3000/content \
+  -d '{"contentType": "article", "fields": {"title": "New Article", "body": "Content here"}}'
+
 # Update content
 curl -X PUT -H "Content-Type: application/json" \
   http://localhost:3000/content/123 \
@@ -83,6 +88,7 @@ curl -X PUT -H "Content-Type: application/json" \
 | `/content` | GET | List content with pagination | Yes |
 | `/content/detail/:nodeId` | GET | Get detailed content by node ID | Yes |
 | **Content Modification** ||||
+| `/content` | POST | Create new content | Yes |
 | `/content/:nodeId` | PUT | Update content by node ID | Yes |
 | **Debug** ||||
 | `/debug/screenshot` | GET | Capture current page screenshot | Yes |
@@ -102,9 +108,131 @@ All CRUD operations require an authenticated admin session:
 
 ---
 
-### Create (Not Yet Implemented)
+### Create
 
-Coming soon.
+Create new content by specifying a content type and field values. The API validates that the content type exists and that all required fields are provided before creating the content.
+
+**Endpoint:** `POST /content`
+
+**Request Body:**
+```json
+{
+  "contentType": "article",
+  "fields": {
+    "title": "New Article Title",
+    "body": "Article body content goes here",
+    "status": true
+  }
+}
+```
+
+**Content Type Validation:**
+
+Before creating content, the API queries available content types and validates that the requested type exists. Use `GET /content/types` to discover available types.
+
+**Required Fields Validation:**
+
+The API loads the schema for the specified content type and validates that all required fields are provided. If any required fields are missing, the request will fail with a descriptive error message.
+
+**Examples:**
+
+**Create an Article:**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  http://localhost:3000/content \
+  -d '{
+    "contentType": "article",
+    "fields": {
+      "title": "My New Article",
+      "body": "This is the article content.",
+      "status": true
+    }
+  }'
+```
+
+**Create a Page:**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  http://localhost:3000/content \
+  -d '{
+    "contentType": "page",
+    "fields": {
+      "title": "About Us",
+      "body": "Information about our organization."
+    }
+  }'
+```
+
+**Create an Event:**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  http://localhost:3000/content \
+  -d '{
+    "contentType": "event",
+    "fields": {
+      "title": "Annual Conference 2025",
+      "body": "Join us for our annual conference.",
+      "event_date": "2025-12-31",
+      "location": "Conference Center",
+      "status": true
+    }
+  }'
+```
+
+**Success Response:**
+```json
+{
+  "success": true,
+  "nodeId": 456,
+  "contentType": "article",
+  "message": "Content created successfully with node ID 456",
+  "redirectUrl": "https://your-site.com/node/456",
+  "filledFields": [
+    {"field": "title", "value": "My New Article", "type": "text"},
+    {"field": "body", "value": "This is the article content.", "type": "textarea"},
+    {"field": "status", "value": true, "type": "checkbox"}
+  ],
+  "skippedFields": []
+}
+```
+
+**Error Response (Missing Required Fields):**
+```json
+{
+  "success": false,
+  "error": "Missing required fields: title",
+  "contentType": "article"
+}
+```
+
+**Error Response (Invalid Content Type):**
+```json
+{
+  "success": false,
+  "error": "Content type \"invalid_type\" not found. Available types: article, page, event, news",
+  "contentType": "invalid_type"
+}
+```
+
+**Default Values:**
+
+Fields not specified in the request will retain their default values from the Drupal form (e.g., a checked "Published" checkbox will remain checked unless you explicitly set `"status": false`).
+
+**Executable Example:**
+
+See `examples/create-content.js` for a complete working example that demonstrates:
+- Loading an authenticated session
+- Querying available content types
+- Creating content with validation
+- Verifying the created content
+
+```bash
+# Run the example (requires authenticated session)
+CONTENT_TYPE=article node examples/create-content.js
+
+# Create an event
+CONTENT_TYPE=event node examples/create-content.js
+```
 
 ---
 

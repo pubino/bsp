@@ -323,6 +323,56 @@ app.get('/content/detail/:nodeId', async (req, res) => {
   }
 });
 
+// Create new content
+app.post('/content', async (req, res) => {
+  debugLog(`POST /content route hit`);
+  debugLog(`Request body: ${JSON.stringify(req.body)}`);
+
+  try {
+    if (!playwrightManager.isReady()) {
+      debugLog('Manager not ready');
+      return res.status(400).json({
+        success: false,
+        error: 'No active browser session. Call /login/interactive first.'
+      });
+    }
+
+    // Validate content type is provided
+    const contentType = req.body.contentType;
+    if (!contentType || typeof contentType !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Content type is required. Provide "contentType" field with machine name (e.g., "article", "page").'
+      });
+    }
+
+    // Validate that fields object is provided
+    const fields = req.body.fields;
+    if (!fields || typeof fields !== 'object' || Object.keys(fields).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No fields provided. Request body must contain "fields" object with field values as key-value pairs.'
+      });
+    }
+
+    debugLog('Calling createContent');
+    const result = await playwrightManager.createContent(contentType, fields);
+    debugLog(`createContent returned: ${JSON.stringify(result)}`);
+
+    if (result.success) {
+      res.status(201).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    debugLog(`Content creation error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Update content by node ID
 app.put('/content/:nodeId', async (req, res) => {
   debugLog(`PUT /content/:nodeId route hit with params: ${JSON.stringify(req.params)}`);
