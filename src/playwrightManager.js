@@ -1267,8 +1267,65 @@ class PlaywrightManager {
         // Update field based on type
         switch (fieldType) {
           case 'text':
-          case 'textarea':
             await this.page.locator(selector).fill(String(fieldValue));
+            break;
+
+          case 'textarea':
+            // Check if this textarea uses CKEditor
+            const hasCKEditor = await element.getAttribute('data-ckeditor5-id').catch(() => null);
+
+            if (hasCKEditor) {
+              // CKEditor is active - use JavaScript to set the content
+              console.log(`Field ${fieldName} uses CKEditor (ID: ${hasCKEditor}), setting content via JavaScript`);
+
+              try {
+                await this.page.evaluate(({ selector, value }) => {
+                  const textarea = document.querySelector(selector);
+                  if (textarea && textarea.ckeditorInstance) {
+                    // CKEditor 5 API
+                    textarea.ckeditorInstance.setData(value);
+                  } else if (textarea) {
+                    // Fallback: try to find CKEditor instance via Drupal
+                    const editorId = textarea.getAttribute('data-ckeditor5-id');
+                    if (window.Drupal && window.Drupal.CKEditor5Instances) {
+                      const instances = window.Drupal.CKEditor5Instances;
+                      for (let instance of instances.values()) {
+                        if (instance.sourceElement === textarea) {
+                          instance.setData(value);
+                          return;
+                        }
+                      }
+                    }
+                    // Last resort: set textarea value directly (may not trigger CKEditor)
+                    textarea.value = value;
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                  }
+                }, { selector, value: String(fieldValue) });
+
+                this.debugLog(`Successfully set CKEditor content for ${fieldName}`);
+              } catch (ckError) {
+                this.debugLog(`CKEditor JavaScript approach failed, trying direct click and type: ${ckError.message}`);
+
+                // Alternative: Click on the CKEditor contenteditable area and type
+                try {
+                  const editorSelector = `.ck-editor__editable[data-cke-editor-id="${hasCKEditor}"]`;
+                  const editorExists = await this.page.locator(editorSelector).count() > 0;
+
+                  if (editorExists) {
+                    await this.page.locator(editorSelector).click();
+                    await this.page.locator(editorSelector).fill(String(fieldValue));
+                    this.debugLog(`Successfully filled CKEditor via contenteditable for ${fieldName}`);
+                  } else {
+                    throw new Error('Could not find CKEditor contenteditable element');
+                  }
+                } catch (altError) {
+                  throw new Error(`CKEditor field handling failed: ${altError.message}`);
+                }
+              }
+            } else {
+              // Regular textarea without CKEditor
+              await this.page.locator(selector).fill(String(fieldValue));
+            }
             break;
 
           case 'checkbox':
