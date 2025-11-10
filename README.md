@@ -642,13 +642,6 @@ curl -X POST http://localhost:3000/session/keepalive
 }
 ```
 
-**Inspect session cookies:**
-```bash
-curl http://localhost:3000/session/cookies
-```
-
-This shows detailed information about Drupal session cookies and CAS/federated authentication cookies, including expiration times.
-
 ### Authentication Status
 
 **Check authentication:**
