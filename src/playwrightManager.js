@@ -2,9 +2,25 @@ const { chromium } = require('playwright');
 const fs = require('fs').promises;
 const fsSync = require('fs'); // For synchronous operations like appendFileSync
 const path = require('path');
+const { validateContentRequest } = require('./validation');
 
 // Debug flag - set DEBUG_LOGGING=true to enable detailed logging
 const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
+
+// Timeout constants (in milliseconds)
+const TIMEOUTS = {
+  NAVIGATION: 30000,        // Page navigation timeout
+  FORM_LOAD: 10000,         // Form element load timeout
+  DOM_CONTENT_LOADED: 5000, // DOM content loaded timeout
+  NETWORK_IDLE: 30000       // Network idle timeout
+};
+
+// Input validation constants
+const VALIDATION = {
+  MAX_TEXT_LENGTH: 10000,      // Maximum length for text fields
+  MAX_TEXTAREA_LENGTH: 50000,  // Maximum length for textarea fields
+  MAX_FIELDS_COUNT: 50         // Maximum number of fields in one request
+};
 
 console.log('PlaywrightManager module loaded');
 
@@ -132,7 +148,7 @@ class PlaywrightManager {
     
     try {
       // Start with about:blank to avoid any automation detection
-      await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 });
+      await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.DOM_CONTENT_LOADED });
       console.log('Started with about:blank');
       
       // Don't try to navigate automatically - let the user do it manually
@@ -160,7 +176,7 @@ class PlaywrightManager {
       const baseUrl = process.env.BASE_URL;
       if (baseUrl) {
         console.log('Navigating to base URL after loading session:', baseUrl);
-        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
       } else {
         console.warn('BASE_URL not set, session may not work correctly');
       }
@@ -258,7 +274,7 @@ class PlaywrightManager {
 
       if (currentDomain !== targetDomain) {
         console.log(`Current domain (${currentDomain}) doesn't match target (${targetDomain}), navigating to base URL`);
-        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
       }
 
       // First try the admin structure page
@@ -266,7 +282,7 @@ class PlaywrightManager {
       console.log('Attempting to access content types via admin:', adminUrl);
       
       try {
-        await this.page.goto(adminUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await this.page.goto(adminUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
         
         // Check if we can access the admin page (look for the table)
         const tableExists = await this.page.locator('table').count() > 0;
@@ -325,7 +341,7 @@ class PlaywrightManager {
       const nodeAddUrl = this.buildUrl(baseUrl, 'node/add');
       console.log('Attempting to access content types via node/add:', nodeAddUrl);
       
-      await this.page.goto(nodeAddUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      await this.page.goto(nodeAddUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
       
       // Extract content types from the node/add page
       const contentTypes = await this.page.evaluate(() => {
@@ -389,7 +405,7 @@ class PlaywrightManager {
 
       if (currentDomain !== targetDomain) {
         console.log(`Current domain (${currentDomain}) doesn't match target (${targetDomain}), navigating to base URL`);
-        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
       }
 
       // Navigate to admin content page with pagination
@@ -399,10 +415,10 @@ class PlaywrightManager {
       }
       console.log('Navigating to admin content page:', contentUrl);
       
-      await this.page.goto(contentUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.page.goto(contentUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
 
       // Wait for the content table to load
-      await this.page.waitForSelector('table', { timeout: 10000 });
+      await this.page.waitForSelector('table', { timeout: TIMEOUTS.FORM_LOAD });
 
       // Extract content information from the table
       const result = await this.page.evaluate(({ limit, contentType, page }) => {
@@ -705,7 +721,7 @@ class PlaywrightManager {
 
       try {
         this.debugFileLog('/tmp/content_detail.log', 'Navigating to edit URL...\n');
-        await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
         this.debugFileLog('/tmp/content_detail.log', `After edit URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we successfully reached the edit page
@@ -734,7 +750,7 @@ class PlaywrightManager {
         this.debugFileLog('/tmp/content_detail.log', `Attempting to access content via view URL: ${viewUrl}\n`);
 
         this.debugFileLog('/tmp/content_detail.log', 'Navigating to view URL...\n');
-        await this.page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.goto(viewUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
         this.debugFileLog('/tmp/content_detail.log', `After view URL navigation, current URL: ${await this.page.url()}\n`);
 
         // Check if we reached the view page
@@ -891,10 +907,10 @@ class PlaywrightManager {
       const editUrl = this.buildUrl(baseUrl, `node/${nodeId}/edit`);
       this.debugFileLog('/tmp/content_update.log', `Navigating to edit URL: ${editUrl}\n`);
 
-      await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.page.goto(editUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
 
       // Wait for the form to be fully loaded
-      await this.page.waitForSelector('form', { timeout: 10000 });
+      await this.page.waitForSelector('form', { timeout: TIMEOUTS.FORM_LOAD });
       this.debugFileLog('/tmp/content_update.log', 'Edit form loaded\n');
 
       // Check if we successfully reached the edit page
@@ -928,7 +944,7 @@ class PlaywrightManager {
         // Wait for navigation or success message
         // Drupal typically redirects to the view page after save
         try {
-          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+          await this.page.waitForLoadState('networkidle', { timeout: TIMEOUTS.NETWORK_IDLE });
         } catch (error) {
           // If networkidle times out, that's okay - check for success message
           this.debugLog('Network idle timeout, checking for success indicators');
@@ -984,15 +1000,10 @@ class PlaywrightManager {
         throw new Error('BASE_URL environment variable is required for content creation');
       }
 
-      // Validate content type is provided
-      if (!contentType || typeof contentType !== 'string') {
-        throw new Error('Content type must be provided as a string (e.g., "article", "page")');
-      }
-
-      // Validate that fields object is provided
-      if (!fields || typeof fields !== 'object' || Object.keys(fields).length === 0) {
-        this.debugFileLog('/tmp/content_create.log', 'No fields provided\n');
-        throw new Error('No fields provided. Request body must contain field values as key-value pairs.');
+      // Validate request using shared validation function
+      const validationResult = validateContentRequest(contentType, fields);
+      if (!validationResult.valid) {
+        throw new Error(validationResult.error);
       }
 
       // First, verify the content type exists
@@ -1020,10 +1031,10 @@ class PlaywrightManager {
       const createUrl = this.buildUrl(baseUrl, `node/add/${contentType}`);
       this.debugFileLog('/tmp/content_create.log', `Navigating to create URL: ${createUrl}\n`);
 
-      await this.page.goto(createUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.page.goto(createUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.NAVIGATION });
 
       // Wait for the form to be fully loaded
-      await this.page.waitForSelector('form', { timeout: 10000 });
+      await this.page.waitForSelector('form', { timeout: TIMEOUTS.FORM_LOAD });
       this.debugFileLog('/tmp/content_create.log', 'Create form loaded\n');
 
       // Check if we successfully reached the create page
@@ -1068,7 +1079,7 @@ class PlaywrightManager {
 
         // Wait for navigation - Drupal redirects to the view page after creation
         try {
-          await this.page.waitForLoadState('networkidle', { timeout: 30000 });
+          await this.page.waitForLoadState('networkidle', { timeout: TIMEOUTS.NETWORK_IDLE });
         } catch (error) {
           this.debugLog('Network idle timeout, checking for success indicators');
         }
@@ -1085,7 +1096,7 @@ class PlaywrightManager {
           this.debugLog('No node ID in redirect URL, attempting to find edit link');
           try {
             // Wait a moment for the page to fully load
-            await this.page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+            await this.page.waitForLoadState('domcontentloaded', { timeout: TIMEOUTS.DOM_CONTENT_LOADED });
 
             // Try multiple selectors for edit links
             const editSelectors = [

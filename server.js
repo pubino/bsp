@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const PlaywrightManager = require('./src/playwrightManager');
+const { validateContentRequest } = require('./src/validation');
 
 // Debug flag for server logging
 const DEBUG_LOGGING = process.env.DEBUG_LOGGING === 'true';
@@ -24,7 +25,8 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(morgan('combined'));
-app.use(express.json());
+// Add payload size limit (1MB) for security
+app.use(express.json({ limit: '1mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -337,21 +339,15 @@ app.post('/content', async (req, res) => {
       });
     }
 
-    // Validate content type is provided
+    // Validate request using shared validation function
     const contentType = req.body.contentType;
-    if (!contentType || typeof contentType !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Content type is required. Provide "contentType" field with machine name (e.g., "article", "page").'
-      });
-    }
-
-    // Validate that fields object is provided
     const fields = req.body.fields;
-    if (!fields || typeof fields !== 'object' || Object.keys(fields).length === 0) {
-      return res.status(400).json({
+
+    const validationResult = validateContentRequest(contentType, fields);
+    if (!validationResult.valid) {
+      return res.status(validationResult.statusCode).json({
         success: false,
-        error: 'No fields provided. Request body must contain "fields" object with field values as key-value pairs.'
+        error: validationResult.error
       });
     }
 
@@ -362,11 +358,23 @@ app.post('/content', async (req, res) => {
     if (result.success) {
       res.status(201).json(result);
     } else {
-      res.status(500).json(result);
+      // Determine appropriate status code based on error type
+      const statusCode = result.error?.includes('not found') || result.error?.includes('does not exist')
+        ? 404
+        : result.error?.includes('required') || result.error?.includes('invalid') || result.error?.includes('must')
+        ? 400
+        : 500;
+      res.status(statusCode).json(result);
     }
   } catch (error) {
     debugLog(`Content creation error: ${error.message}`);
-    res.status(500).json({
+    // Determine status code from error message
+    const statusCode = error.message?.includes('not found') || error.message?.includes('does not exist')
+      ? 404
+      : error.message?.includes('required') || error.message?.includes('invalid') || error.message?.includes('must')
+      ? 400
+      : 500;
+    res.status(statusCode).json({
       success: false,
       error: error.message
     });

@@ -99,14 +99,14 @@ describe('PlaywrightManager - Content Creation', () => {
       const result = await manager.createContent('', { title: 'New Article' });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Content type must be provided');
+      expect(result.error).toContain('Content type');
     });
 
     test('should throw error if fields are not provided', async () => {
       const result = await manager.createContent('article', {});
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('No fields provided');
+      expect(result.error).toContain('field');
     });
 
     test('should verify content type exists before creating', async () => {
