@@ -826,6 +826,9 @@ class PlaywrightManager {
     // Stop keepalive before closing
     this.stopKeepalive();
 
+    // Reset keepalive timestamp to allow immediate refresh after reopen
+    this.keepaliveLastRefresh = null;
+
     try {
       if (this.page) {
         await this.page.close();
