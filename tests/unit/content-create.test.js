@@ -178,7 +178,10 @@ describe('PlaywrightManager - Content Creation', () => {
         contentTypes: [{ name: 'Article', machineName: 'article' }]
       });
 
-      mockPage.url.mockReturnValue('https://example.com/node/123');
+      // First call after goto returns create page URL, second call after submit returns node URL
+      mockPage.url
+        .mockReturnValueOnce('https://example.com/node/add/article')  // After navigation
+        .mockReturnValueOnce('https://example.com/node/123');         // After form submission
       mockLocator.count.mockResolvedValue(1);
       mockLocator.getAttribute.mockResolvedValue('/node/123/edit'); // For edit link extraction
 
@@ -196,7 +199,9 @@ describe('PlaywrightManager - Content Creation', () => {
         contentTypes: [{ name: 'Article', machineName: 'article' }]
       });
 
-      mockPage.url.mockReturnValue('https://example.com/node/456');
+      mockPage.url
+        .mockReturnValueOnce('https://example.com/node/add/article')
+        .mockReturnValueOnce('https://example.com/node/456');
       mockLocator.count.mockResolvedValue(1);
       mockLocator.getAttribute.mockResolvedValue('/node/456/edit');
 
@@ -212,7 +217,9 @@ describe('PlaywrightManager - Content Creation', () => {
         contentTypes: [{ name: 'Article', machineName: 'article' }]
       });
 
-      mockPage.url.mockReturnValue('https://example.com/node/123');
+      mockPage.url
+        .mockReturnValueOnce('https://example.com/node/add/article')
+        .mockReturnValueOnce('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(1);
       mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
@@ -228,7 +235,18 @@ describe('PlaywrightManager - Content Creation', () => {
         contentTypes: [{ name: 'Article', machineName: 'article' }]
       });
 
-      mockPage.url.mockReturnValue('https://example.com/node/123');
+      // No schema so no required field validation
+      manager.loadSchemaForContentType = jest.fn().mockResolvedValue(null);
+
+      // Override the mock for this specific test to return skipped fields
+      manager.updateFormFields = jest.fn().mockResolvedValue({
+        updated: [],
+        skipped: [{ field: 'nonexistent_field', reason: 'Field not found' }]
+      });
+
+      mockPage.url
+        .mockReturnValueOnce('https://example.com/node/add/article')
+        .mockReturnValueOnce('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(0); // Field not found
       mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
@@ -269,7 +287,9 @@ describe('PlaywrightManager - Content Creation', () => {
         }
       });
 
-      mockPage.url.mockReturnValue('https://example.com/node/123');
+      mockPage.url
+        .mockReturnValueOnce('https://example.com/node/add/article')
+        .mockReturnValueOnce('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(1);
       mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
