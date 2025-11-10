@@ -59,6 +59,12 @@ describe('PlaywrightManager - Content Creation', () => {
     manager.context = mockContext;
     manager.page = mockPage;
 
+    // Mock updateFormFields method
+    manager.updateFormFields = jest.fn().mockResolvedValue({
+      updated: [{ field: 'title', value: 'New Article' }],
+      skipped: []
+    });
+
     // Set environment variable for BASE_URL
     process.env.BASE_URL = 'https://example.com';
   });
