@@ -12,6 +12,7 @@ jest.mock('playwright', () => ({
           title: jest.fn().mockResolvedValue('Test Page'),
           evaluate: jest.fn().mockResolvedValue('Test Title'),
           screenshot: jest.fn().mockRejectedValue(new Error('Timeout')),
+          goto: jest.fn().mockResolvedValue(),
           on: jest.fn().mockImplementation(() => {}),
           close: jest.fn().mockResolvedValue(),
         }),
