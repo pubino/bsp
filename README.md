@@ -593,6 +593,62 @@ curl -X POST http://localhost:3000/login/load
 
 **Note:** Session files contain authentication cookies and may become stale. Re-authenticate if operations fail.
 
+### Session Keepalive
+
+**Automatic Keepalive (Internal):**
+
+The system includes an internal keepalive mechanism that automatically refreshes your session to prevent expiration. This is especially important for CAS/Shibboleth authentication where session cookies are session-based.
+
+- **Enabled by default** - Runs automatically when session is loaded
+- **Default interval**: 60 minutes
+- **Configure via environment variables:**
+  ```bash
+  KEEPALIVE_ENABLED=true          # Enable/disable (default: true)
+  KEEPALIVE_INTERVAL_MINUTES=60   # Interval in minutes (default: 60)
+  ```
+
+**Check keepalive status:**
+```bash
+curl http://localhost:3000/session/keepalive/status
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "enabled": true,
+  "running": true,
+  "intervalMinutes": 60
+}
+```
+
+**Manual Keepalive (External):**
+
+You can also manually refresh the session as an additional safety layer:
+
+```bash
+curl -X POST http://localhost:3000/session/keepalive
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Session refreshed",
+  "sessionExpiry": {
+    "expiresDate": "2026-12-14T21:41:49.162Z",
+    "hoursUntilExpiry": 9595
+  }
+}
+```
+
+**Inspect session cookies:**
+```bash
+curl http://localhost:3000/session/cookies
+```
+
+This shows detailed information about Drupal session cookies and CAS/federated authentication cookies, including expiration times.
+
 ### Authentication Status
 
 **Check authentication:**

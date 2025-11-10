@@ -32,6 +32,9 @@ class PlaywrightManager {
     this.storageDir = path.join(process.cwd(), 'storage');
     this.storageStatePath = path.join(this.storageDir, 'storageState.json');
     this.display = process.env.DISPLAY || ':99';
+    this.keepaliveInterval = null;
+    this.keepaliveEnabled = process.env.KEEPALIVE_ENABLED !== 'false'; // Default: enabled
+    this.keepaliveIntervalMinutes = parseInt(process.env.KEEPALIVE_INTERVAL_MINUTES) || 60; // Default: 60 minutes
   }
 
   // Debug logging helper
@@ -650,9 +653,94 @@ class PlaywrightManager {
     }
   }
 
+  /**
+   * Start internal keepalive mechanism
+   * Automatically refreshes session at configured intervals
+   */
+  startKeepalive() {
+    if (!this.keepaliveEnabled) {
+      console.log('Keepalive disabled via KEEPALIVE_ENABLED=false');
+      return;
+    }
+
+    if (this.keepaliveInterval) {
+      console.log('Keepalive already running');
+      return;
+    }
+
+    const intervalMs = this.keepaliveIntervalMinutes * 60 * 1000;
+    console.log(`Starting internal keepalive: will refresh session every ${this.keepaliveIntervalMinutes} minutes`);
+
+    this.keepaliveInterval = setInterval(async () => {
+      try {
+        if (!this.isReady()) {
+          console.log('Keepalive: Browser not ready, skipping');
+          return;
+        }
+
+        const baseUrl = process.env.BASE_URL;
+        if (!baseUrl) {
+          console.log('Keepalive: BASE_URL not set, skipping');
+          return;
+        }
+
+        console.log(`Keepalive: Refreshing session by navigating to ${baseUrl}`);
+        const currentUrl = this.page.url();
+
+        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+
+        // Get session cookie info
+        const cookies = await this.context.cookies();
+        const sessionCookie = cookies.find(c => c.name.includes('SESS') || c.name.includes('SSESS'));
+
+        if (sessionCookie && sessionCookie.expires > 0) {
+          const now = Date.now() / 1000;
+          const hoursUntilExpiry = Math.round((sessionCookie.expires - now) / 3600);
+          console.log(`Keepalive: Session refreshed successfully. Expires in ${hoursUntilExpiry} hours`);
+        } else {
+          console.log('Keepalive: Session refreshed (session cookie or no expiry)');
+        }
+
+        // Navigate back if we were somewhere else
+        if (currentUrl !== baseUrl) {
+          await this.page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+        }
+      } catch (error) {
+        console.error('Keepalive error:', error.message);
+      }
+    }, intervalMs);
+
+    console.log('Internal keepalive started');
+  }
+
+  /**
+   * Stop internal keepalive mechanism
+   */
+  stopKeepalive() {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+      console.log('Internal keepalive stopped');
+    }
+  }
+
+  /**
+   * Get keepalive status
+   */
+  getKeepaliveStatus() {
+    return {
+      enabled: this.keepaliveEnabled,
+      running: this.keepaliveInterval !== null,
+      intervalMinutes: this.keepaliveIntervalMinutes
+    };
+  }
+
   async close() {
     console.log('Closing PlaywrightManager resources...');
-    
+
+    // Stop keepalive before closing
+    this.stopKeepalive();
+
     try {
       if (this.page) {
         await this.page.close();
