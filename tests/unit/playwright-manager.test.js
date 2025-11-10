@@ -30,6 +30,11 @@ describe('PlaywrightManager Unit Tests', () => {
     // Clear all mocks
     jest.clearAllMocks();
 
+    // Clean up environment variables from previous tests
+    delete process.env.KEEPALIVE_ENABLED;
+    delete process.env.KEEPALIVE_INTERVAL_MINUTES;
+    delete process.env.KEEPALIVE_MAX_FAILURES;
+
     // Create a new manager instance for each test
     manager = new PlaywrightManager();
   });
