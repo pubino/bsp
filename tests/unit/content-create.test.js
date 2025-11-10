@@ -174,6 +174,7 @@ describe('PlaywrightManager - Content Creation', () => {
 
       mockPage.url.mockReturnValue('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(1);
+      mockLocator.getAttribute.mockResolvedValue('/node/123/edit'); // For edit link extraction
 
       const result = await manager.createContent('article', { title: 'New Article' });
 
@@ -191,6 +192,7 @@ describe('PlaywrightManager - Content Creation', () => {
 
       mockPage.url.mockReturnValue('https://example.com/node/456');
       mockLocator.count.mockResolvedValue(1);
+      mockLocator.getAttribute.mockResolvedValue('/node/456/edit');
 
       const result = await manager.createContent('article', { title: 'New Article' });
 
@@ -206,6 +208,7 @@ describe('PlaywrightManager - Content Creation', () => {
 
       mockPage.url.mockReturnValue('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(1);
+      mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
       const result = await manager.createContent('article', { title: 'New Article' });
 
@@ -221,6 +224,7 @@ describe('PlaywrightManager - Content Creation', () => {
 
       mockPage.url.mockReturnValue('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(0); // Field not found
+      mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
       const result = await manager.createContent('article', { nonexistent_field: 'value' });
 
@@ -261,6 +265,7 @@ describe('PlaywrightManager - Content Creation', () => {
 
       mockPage.url.mockReturnValue('https://example.com/node/123');
       mockLocator.count.mockResolvedValue(1);
+      mockLocator.getAttribute.mockResolvedValue('/node/123/edit');
 
       const result = await manager.createContent('article', { title: 'Required Title' });
 
