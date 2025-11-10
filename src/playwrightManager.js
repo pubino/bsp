@@ -35,6 +35,9 @@ class PlaywrightManager {
     this.keepaliveInterval = null;
     this.keepaliveEnabled = process.env.KEEPALIVE_ENABLED !== 'false'; // Default: enabled
     this.keepaliveIntervalMinutes = parseInt(process.env.KEEPALIVE_INTERVAL_MINUTES) || 60; // Default: 60 minutes
+    this.keepaliveConsecutiveFailures = 0;
+    this.keepaliveMaxFailures = parseInt(process.env.KEEPALIVE_MAX_FAILURES) || 3; // Circuit breaker threshold
+    this.keepaliveCircuitOpen = false;
   }
 
   // Debug logging helper
@@ -655,7 +658,7 @@ class PlaywrightManager {
 
   /**
    * Start internal keepalive mechanism
-   * Automatically refreshes session at configured intervals
+   * Automatically refreshes session at configured intervals with retry logic and circuit breaker
    */
   startKeepalive() {
     if (!this.keepaliveEnabled) {
@@ -663,15 +666,24 @@ class PlaywrightManager {
       return;
     }
 
-    if (this.keepaliveInterval) {
-      console.log('Keepalive already running');
-      return;
-    }
+    // Stop existing keepalive first to prevent duplicates
+    this.stopKeepalive();
+
+    // Reset circuit breaker state
+    this.keepaliveConsecutiveFailures = 0;
+    this.keepaliveCircuitOpen = false;
 
     const intervalMs = this.keepaliveIntervalMinutes * 60 * 1000;
     console.log(`Starting internal keepalive: will refresh session every ${this.keepaliveIntervalMinutes} minutes`);
+    console.log(`Keepalive circuit breaker: max failures = ${this.keepaliveMaxFailures}`);
 
     this.keepaliveInterval = setInterval(async () => {
+      // Check circuit breaker
+      if (this.keepaliveCircuitOpen) {
+        console.warn(`Keepalive: Circuit breaker OPEN (${this.keepaliveConsecutiveFailures} consecutive failures). Skipping refresh.`);
+        return;
+      }
+
       try {
         if (!this.isReady()) {
           console.log('Keepalive: Browser not ready, skipping');
@@ -687,7 +699,28 @@ class PlaywrightManager {
         console.log(`Keepalive: Refreshing session by navigating to ${baseUrl}`);
         const currentUrl = this.page.url();
 
-        await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+        // Attempt navigation with retry logic
+        let retries = 3;
+        let lastError = null;
+        let success = false;
+
+        while (retries > 0 && !success) {
+          try {
+            await this.page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+            success = true;
+          } catch (error) {
+            lastError = error;
+            retries--;
+            if (retries > 0) {
+              console.warn(`Keepalive: Navigation failed, retrying (${retries} attempts remaining)...`);
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+            }
+          }
+        }
+
+        if (!success) {
+          throw lastError;
+        }
 
         // Get session cookie info
         const cookies = await this.context.cookies();
@@ -703,10 +736,29 @@ class PlaywrightManager {
 
         // Navigate back if we were somewhere else
         if (currentUrl !== baseUrl) {
-          await this.page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+          try {
+            await this.page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUTS.FORM_LOAD });
+          } catch (error) {
+            console.warn(`Keepalive: Could not navigate back to ${currentUrl}: ${error.message}`);
+          }
         }
+
+        // Success - reset failure counter
+        if (this.keepaliveConsecutiveFailures > 0) {
+          console.log(`Keepalive: Recovery successful. Resetting failure counter from ${this.keepaliveConsecutiveFailures} to 0`);
+          this.keepaliveConsecutiveFailures = 0;
+        }
+
       } catch (error) {
-        console.error('Keepalive error:', error.message);
+        this.keepaliveConsecutiveFailures++;
+        console.error(`Keepalive error (failure ${this.keepaliveConsecutiveFailures}/${this.keepaliveMaxFailures}): ${error.message}`);
+
+        // Open circuit breaker if max failures reached
+        if (this.keepaliveConsecutiveFailures >= this.keepaliveMaxFailures) {
+          this.keepaliveCircuitOpen = true;
+          console.error(`Keepalive: Circuit breaker OPENED after ${this.keepaliveConsecutiveFailures} consecutive failures. Keepalive is now disabled.`);
+          console.error('Keepalive: To recover, restart keepalive manually or reload the session.');
+        }
       }
     }, intervalMs);
 
@@ -725,13 +777,18 @@ class PlaywrightManager {
   }
 
   /**
-   * Get keepalive status
+   * Get keepalive status including circuit breaker state
    */
   getKeepaliveStatus() {
     return {
       enabled: this.keepaliveEnabled,
       running: this.keepaliveInterval !== null,
-      intervalMinutes: this.keepaliveIntervalMinutes
+      intervalMinutes: this.keepaliveIntervalMinutes,
+      circuitBreaker: {
+        open: this.keepaliveCircuitOpen,
+        consecutiveFailures: this.keepaliveConsecutiveFailures,
+        maxFailures: this.keepaliveMaxFailures
+      }
     };
   }
 

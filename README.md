@@ -599,13 +599,19 @@ curl -X POST http://localhost:3000/login/load
 
 The system includes an internal keepalive mechanism that automatically refreshes your session to prevent expiration. This is especially important for CAS/Shibboleth authentication where session cookies are session-based.
 
+**Features:**
 - **Enabled by default** - Runs automatically when session is loaded
 - **Default interval**: 60 minutes
-- **Configure via environment variables:**
-  ```bash
-  KEEPALIVE_ENABLED=true          # Enable/disable (default: true)
-  KEEPALIVE_INTERVAL_MINUTES=60   # Interval in minutes (default: 60)
-  ```
+- **Retry logic**: Automatically retries navigation failures up to 3 times with 2-second delays
+- **Circuit breaker**: Disables keepalive after 3 consecutive failures to prevent resource waste
+- **Auto-recovery**: Resets failure counter on successful refresh
+
+**Configuration:**
+```bash
+KEEPALIVE_ENABLED=true          # Enable/disable (default: true)
+KEEPALIVE_INTERVAL_MINUTES=60   # Interval in minutes (default: 60)
+KEEPALIVE_MAX_FAILURES=3        # Circuit breaker threshold (default: 3)
+```
 
 **Check keepalive status:**
 ```bash
@@ -618,7 +624,12 @@ curl http://localhost:3000/session/keepalive/status
   "success": true,
   "enabled": true,
   "running": true,
-  "intervalMinutes": 60
+  "intervalMinutes": 60,
+  "circuitBreaker": {
+    "open": false,
+    "consecutiveFailures": 0,
+    "maxFailures": 3
+  }
 }
 ```
 

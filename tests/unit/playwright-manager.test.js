@@ -142,4 +142,178 @@ describe('PlaywrightManager Unit Tests', () => {
       expect(manager.page).toBeNull();
     });
   });
+
+  describe('Keepalive Functionality', () => {
+    beforeEach(() => {
+      // Clear environment variables before each test
+      delete process.env.KEEPALIVE_ENABLED;
+      delete process.env.KEEPALIVE_INTERVAL_MINUTES;
+      jest.clearAllTimers();
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    test('should initialize with keepalive enabled by default', () => {
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveEnabled).toBe(true);
+      expect(mgr.keepaliveIntervalMinutes).toBe(60);
+      expect(mgr.keepaliveInterval).toBeNull();
+    });
+
+    test('should respect KEEPALIVE_ENABLED=false environment variable', () => {
+      process.env.KEEPALIVE_ENABLED = 'false';
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveEnabled).toBe(false);
+    });
+
+    test('should respect KEEPALIVE_INTERVAL_MINUTES environment variable', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '30';
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(30);
+    });
+
+    test('should use default interval when KEEPALIVE_INTERVAL_MINUTES is invalid', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = 'invalid';
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveIntervalMinutes).toBe(60);
+    });
+
+    test('getKeepaliveStatus should return correct status when not running', () => {
+      const status = manager.getKeepaliveStatus();
+      expect(status.enabled).toBe(true);
+      expect(status.running).toBe(false);
+      expect(status.intervalMinutes).toBe(60);
+      expect(status.circuitBreaker).toBeDefined();
+      expect(status.circuitBreaker.open).toBe(false);
+      expect(status.circuitBreaker.consecutiveFailures).toBe(0);
+      expect(status.circuitBreaker.maxFailures).toBe(3);
+    });
+
+    test('getKeepaliveStatus should return correct status when running', () => {
+      manager.keepaliveInterval = setInterval(() => {}, 1000);
+      const status = manager.getKeepaliveStatus();
+      expect(status.enabled).toBe(true);
+      expect(status.running).toBe(true);
+      expect(status.intervalMinutes).toBe(60);
+      expect(status.circuitBreaker).toBeDefined();
+      clearInterval(manager.keepaliveInterval);
+      manager.keepaliveInterval = null;
+    });
+
+    test('startKeepalive should not start when disabled', () => {
+      process.env.KEEPALIVE_ENABLED = 'false';
+      const mgr = new PlaywrightManager();
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      mgr.startKeepalive();
+
+      expect(mgr.keepaliveInterval).toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith('Keepalive disabled via KEEPALIVE_ENABLED=false');
+      consoleSpy.mockRestore();
+    });
+
+    test('startKeepalive should stop existing keepalive before starting new one', () => {
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+      const firstInterval = setInterval(() => {}, 1000);
+      manager.keepaliveInterval = firstInterval;
+
+      manager.startKeepalive();
+
+      expect(manager.keepaliveInterval).not.toBe(firstInterval);
+      expect(manager.keepaliveInterval).not.toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith('Internal keepalive stopped');
+      expect(consoleSpy).toHaveBeenCalledWith('Internal keepalive started');
+
+      manager.stopKeepalive();
+      consoleSpy.mockRestore();
+    });
+
+    test('startKeepalive should set up interval correctly', () => {
+      process.env.KEEPALIVE_INTERVAL_MINUTES = '30';
+      const mgr = new PlaywrightManager();
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      mgr.startKeepalive();
+
+      expect(mgr.keepaliveInterval).not.toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith('Starting internal keepalive: will refresh session every 30 minutes');
+      expect(consoleSpy).toHaveBeenCalledWith('Internal keepalive started');
+
+      mgr.stopKeepalive();
+      consoleSpy.mockRestore();
+    });
+
+    test('stopKeepalive should clear interval', () => {
+      manager.keepaliveInterval = setInterval(() => {}, 1000);
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      manager.stopKeepalive();
+
+      expect(manager.keepaliveInterval).toBeNull();
+      expect(consoleSpy).toHaveBeenCalledWith('Internal keepalive stopped');
+      consoleSpy.mockRestore();
+    });
+
+    test('stopKeepalive should handle being called when not running', () => {
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      manager.stopKeepalive();
+
+      expect(manager.keepaliveInterval).toBeNull();
+      expect(consoleSpy).not.toHaveBeenCalledWith('Internal keepalive stopped');
+      consoleSpy.mockRestore();
+    });
+
+    test('close should stop keepalive', async () => {
+      await manager.createInteractiveContext();
+      manager.keepaliveInterval = setInterval(() => {}, 1000);
+
+      await manager.close();
+
+      expect(manager.keepaliveInterval).toBeNull();
+    });
+
+    test('should initialize circuit breaker state correctly', () => {
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveConsecutiveFailures).toBe(0);
+      expect(mgr.keepaliveMaxFailures).toBe(3);
+      expect(mgr.keepaliveCircuitOpen).toBe(false);
+    });
+
+    test('should respect KEEPALIVE_MAX_FAILURES environment variable', () => {
+      process.env.KEEPALIVE_MAX_FAILURES = '5';
+      const mgr = new PlaywrightManager();
+      expect(mgr.keepaliveMaxFailures).toBe(5);
+    });
+
+    test('startKeepalive should reset circuit breaker state', () => {
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      // Simulate a circuit breaker state
+      manager.keepaliveConsecutiveFailures = 2;
+      manager.keepaliveCircuitOpen = true;
+
+      manager.startKeepalive();
+
+      expect(manager.keepaliveConsecutiveFailures).toBe(0);
+      expect(manager.keepaliveCircuitOpen).toBe(false);
+
+      manager.stopKeepalive();
+      consoleSpy.mockRestore();
+    });
+
+    test('getKeepaliveStatus should include circuit breaker state', () => {
+      manager.keepaliveConsecutiveFailures = 2;
+      manager.keepaliveCircuitOpen = true;
+
+      const status = manager.getKeepaliveStatus();
+
+      expect(status.circuitBreaker.open).toBe(true);
+      expect(status.circuitBreaker.consecutiveFailures).toBe(2);
+      expect(status.circuitBreaker.maxFailures).toBe(3);
+    });
+  });
 });
