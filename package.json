@@ -9,14 +9,14 @@
     "test": "docker-compose --profile test run --rm test npm run test:all",
     "test:watch": "NODE_ENV=test npx jest --watch",
     "test:unit": "docker-compose --profile test run --rm test npm run test:unit:only",
-    "test:unit:only": "NODE_ENV=test npx jest --testPathPattern=unit",
-    "test:unit:host": "NODE_ENV=test npx jest --testPathPattern=unit",
+    "test:unit:only": "NODE_ENV=test npx jest --testPathPatterns=unit",
+    "test:unit:host": "NODE_ENV=test npx jest --testPathPatterns=unit",
     "test:integration": "node tests/run-integration-tests.js",
-  "test:integration:direct": "NODE_ENV=test npx jest --testPathPattern=integration --runInBand --detectOpenHandles",
+    "test:integration:direct": "NODE_ENV=test npx jest --testPathPatterns=integration --runInBand --detectOpenHandles",
     "test:all": "NODE_ENV=test npx jest",
     "test:container": "docker-compose --profile test run --rm test",
     "test:integration:container": "docker-compose --profile test run --rm test npm run test:integration:direct",
-    "test:only": "NODE_ENV=test npx jest --testPathPattern=integration --forceExit"
+    "test:only": "NODE_ENV=test npx jest --testPathPatterns=integration --forceExit"
   },
   "dependencies": {
     "cors": "^2.8.5",
